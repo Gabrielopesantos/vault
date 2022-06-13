@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/helper/errutil"
@@ -299,6 +301,7 @@ func (b *backend) pathFetchRead(ctx context.Context, req *logical.Request, data 
 reply:
 	switch {
 	case len(contentType) != 0:
+		log.Println("Len of content type is different than 0")
 		response = &logical.Response{
 			Data: map[string]interface{}{
 				logical.HTTPContentType: contentType,
@@ -333,6 +336,19 @@ reply:
 	}
 
 	return
+}
+
+// retrieveIfModifiedSinceFromHeaders
+func retrieveIfModifiedSinceFromHeaders(req *logical.Request) (time.Time, error) {
+	headersField := "If-Modified-Since" // ?
+	ifModifiedSinceValue := req.Headers[headersField]
+
+	sinceTs, err := time.Parse(time.RFC822, ifModifiedSinceValue[0]) // Which date layout do we want?
+	if err != nil {
+		return time.Now(), err // time.Now()?
+	}
+
+	return sinceTs, nil
 }
 
 const pathFetchHelpSyn = `

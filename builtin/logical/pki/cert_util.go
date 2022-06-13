@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/url"
 	"regexp"
@@ -154,6 +155,7 @@ func fetchCAInfoByIssuerId(ctx context.Context, b *backend, req *logical.Request
 // Support for fetching CA certificates was removed, due to the new issuers
 // changes.
 func fetchCertBySerial(ctx context.Context, b *backend, req *logical.Request, prefix, serial string) (*logical.StorageEntry, error) {
+	log.Println("in fetchCertBySerial")
 	var path, legacyPath string
 	var err error
 	var certEntry *logical.StorageEntry

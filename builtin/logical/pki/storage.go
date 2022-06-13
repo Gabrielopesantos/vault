@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/sdk/helper/certutil"
@@ -148,8 +149,9 @@ type issuerEntry struct {
 }
 
 type localCRLConfigEntry struct {
-	IssuerIDCRLMap map[issuerID]crlID `json:"issuer_id_crl_map" structs:"issuer_id_crl_map" mapstructure:"issuer_id_crl_map"`
-	CRLNumberMap   map[crlID]int64    `json:"crl_number_map" structs:"crl_number_map" mapstructure:"crl_number_map"`
+	IssuerIDCRLMap       map[issuerID]crlID `json:"issuer_id_crl_map" structs:"issuer_id_crl_map" mapstructure:"issuer_id_crl_map"`
+	CRLNumberMap         map[crlID]int64    `json:"crl_number_map" structs:"crl_number_map" mapstructure:"crl_number_map"`
+	LastRequestTimestamp time.Time          `json:"last_request_timestamp"` // Not sure if tags are needed
 }
 
 type keyConfigEntry struct {
@@ -699,6 +701,9 @@ func getLocalCRLConfig(ctx context.Context, s logical.Storage) (*localCRLConfigE
 	if len(mapping.CRLNumberMap) == 0 {
 		mapping.CRLNumberMap = make(map[crlID]int64)
 	}
+
+	// Set timestamp of current request  // Here?
+	mapping.LastRequestTimestamp = time.Now()
 
 	return mapping, nil
 }
