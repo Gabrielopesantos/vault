@@ -320,6 +320,13 @@ reply:
 			response.Data[logical.HTTPStatusCode] = 204
 		}
 	case retErr != nil:
+		// NOTE: Temporary fix
+		log.Println("Case where response is 304")
+		if retErr.Error() == "crl has not been modified after `if-modified-since` date" {
+			response.Data[logical.HTTPStatusCode] = 304
+			response.Headers["Last-Modified"] = []string{"Get this date"}
+			return
+		}
 		response = nil
 		return
 	case response == nil:

@@ -170,10 +170,11 @@ func fetchCertBySerial(ctx context.Context, b *backend, req *logical.Request, pr
 		legacyPath = "revoked/" + colonSerial
 		path = "revoked/" + hyphenSerial
 	case serial == legacyCRLPath:
+		log.Println("In case where serial equals `crl`")
 		if err = b.crlBuilder.rebuildIfForced(ctx, b, req); err != nil {
 			return nil, err
 		}
-		path, err = resolveIssuerCRLPath(ctx, b, req.Storage, defaultRef)
+		path, err = resolveIssuerCRLPath(ctx, b, req, defaultRef)
 		if err != nil {
 			return nil, err
 		}

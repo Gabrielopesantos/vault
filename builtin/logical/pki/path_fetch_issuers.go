@@ -673,7 +673,7 @@ func (b *backend) pathGetIssuerCRL(ctx context.Context, req *logical.Request, da
 		return nil, err
 	}
 
-	crlPath, err := resolveIssuerCRLPath(ctx, b, req.Storage, issuerName)
+	crlPath, err := resolveIssuerCRLPath(ctx, b, req, issuerName)
 	if err != nil {
 		return nil, err
 	}

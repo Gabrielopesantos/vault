@@ -6,6 +6,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -149,9 +150,9 @@ type issuerEntry struct {
 }
 
 type localCRLConfigEntry struct {
-	IssuerIDCRLMap       map[issuerID]crlID `json:"issuer_id_crl_map" structs:"issuer_id_crl_map" mapstructure:"issuer_id_crl_map"`
-	CRLNumberMap         map[crlID]int64    `json:"crl_number_map" structs:"crl_number_map" mapstructure:"crl_number_map"`
-	LastRequestTimestamp time.Time          `json:"last_request_timestamp"` // Not sure if tags are needed
+	IssuerIDCRLMap map[issuerID]crlID `json:"issuer_id_crl_map" structs:"issuer_id_crl_map" mapstructure:"issuer_id_crl_map"`
+	CRLNumberMap   map[crlID]int64    `json:"crl_number_map" structs:"crl_number_map" mapstructure:"crl_number_map"`
+	LastModified   time.Time          `json:"last_request_timestamp"`
 }
 
 type keyConfigEntry struct {
@@ -678,6 +679,9 @@ func setLocalCRLConfig(ctx context.Context, s logical.Storage, mapping *localCRL
 		return err
 	}
 
+	// Update `LastModified`
+	mapping.LastModified = time.Now()
+
 	return s.Put(ctx, json)
 }
 
@@ -702,8 +706,7 @@ func getLocalCRLConfig(ctx context.Context, s logical.Storage) (*localCRLConfigE
 		mapping.CRLNumberMap = make(map[crlID]int64)
 	}
 
-	// Set timestamp of current request  // Here?
-	mapping.LastRequestTimestamp = time.Now()
+	log.Printf("Logging at getLocalCRLConfig: %v\n", mapping.LastModified)
 
 	return mapping, nil
 }
@@ -808,19 +811,34 @@ func resolveIssuerReference(ctx context.Context, s logical.Storage, reference st
 	return IssuerRefNotFound, errutil.UserError{Err: fmt.Sprintf("unable to find PKI issuer for reference: %v", reference)}
 }
 
-func resolveIssuerCRLPath(ctx context.Context, b *backend, s logical.Storage, reference string) (string, error) {
+func resolveIssuerCRLPath(ctx context.Context, b *backend, req *logical.Request, reference string) (string, error) {
+	log.Println("Entered resolveIsserCRLPath")
 	if b.useLegacyBundleCaStorage() {
+		log.Println("using legacy bundle ca storage")
 		return legacyCRLPath, nil
 	}
 
-	issuer, err := resolveIssuerReference(ctx, s, reference)
+	issuer, err := resolveIssuerReference(ctx, req.Storage, reference)
+	if err != nil {
+		log.Printf("resolveIssuerReference error: %v", err)
+		return legacyCRLPath, err
+	}
+
+	log.Println("About to call getLocalCRLConfig in resolveIssuerCRLPath")
+	crlConfig, err := getLocalCRLConfig(ctx, req.Storage)
 	if err != nil {
 		return legacyCRLPath, err
 	}
 
-	crlConfig, err := getLocalCRLConfig(ctx, s)
+	// Validations here
+	ifModifiedSinceVal, err := retrieveIfModifiedSinceFromHeaders(req)
 	if err != nil {
 		return legacyCRLPath, err
+	}
+
+	if !crlConfig.LastModified.IsZero() && crlConfig.LastModified.Before(ifModifiedSinceVal) {
+		// Has to respond with a 304 code and with an `Last-Modified` header with the last modified date
+		return legacyCRLPath, fmt.Errorf("crl has not been modified after `if-modified-since` date")
 	}
 
 	if crlId, ok := crlConfig.IssuerIDCRLMap[issuer]; ok && len(crlId) > 0 {
