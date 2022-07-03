@@ -321,10 +321,10 @@ reply:
 		}
 	case retErr != nil:
 		// NOTE: Temporary fix
-		log.Println("Case where response is 304")
 		if retErr.Error() == "crl has not been modified after `if-modified-since` date" {
+			log.Println("Case where response is 304")
 			response.Data[logical.HTTPStatusCode] = 304
-			response.Headers["Last-Modified"] = []string{"Get this date"}
+			//response.Headers["Last-Modified"] = []string{"Get this date"}
 			return
 		}
 		response = nil
@@ -345,17 +345,25 @@ reply:
 	return
 }
 
-// retrieveIfModifiedSinceFromHeaders
-func retrieveIfModifiedSinceFromHeaders(req *logical.Request) (time.Time, error) {
-	headersField := "If-Modified-Since" // ?
+// fetchIfModifiedSinceFromHeaders - Not here?
+func fetchIfModifiedSinceFromHeaders(req *logical.Request) (time.Time, error) {
+	headersField := "If-Modified-Since"
+	var ifModifiedSinceTimestamp time.Time
+	log.Printf("Request headers\n+%v\n", req.Headers)
 	ifModifiedSinceValue := req.Headers[headersField]
 
-	sinceTs, err := time.Parse(time.RFC822, ifModifiedSinceValue[0]) // Which date layout do we want?
-	if err != nil {
-		return time.Now(), err // time.Now()?
+	// Getting an error
+	log.Printf("ifModifiedSinceValue len %v", len(ifModifiedSinceValue))
+	if len(ifModifiedSinceValue) == 0 {
+		return ifModifiedSinceTimestamp, nil
 	}
 
-	return sinceTs, nil
+	ifModifiedSinceTimestamp, err := time.Parse(time.RFC822, ifModifiedSinceValue[0]) // Which date layout do we want?
+	if err != nil {
+		return ifModifiedSinceTimestamp, err
+	}
+
+	return ifModifiedSinceTimestamp, nil
 }
 
 const pathFetchHelpSyn = `

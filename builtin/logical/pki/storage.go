@@ -152,7 +152,7 @@ type issuerEntry struct {
 type localCRLConfigEntry struct {
 	IssuerIDCRLMap map[issuerID]crlID `json:"issuer_id_crl_map" structs:"issuer_id_crl_map" mapstructure:"issuer_id_crl_map"`
 	CRLNumberMap   map[crlID]int64    `json:"crl_number_map" structs:"crl_number_map" mapstructure:"crl_number_map"`
-	LastModified   time.Time          `json:"last_request_timestamp"`
+	LastModified   time.Time          `json:"last_modified" structs:"last_modified" mapstructure:"last_modified"`
 }
 
 type keyConfigEntry struct {
@@ -679,9 +679,6 @@ func setLocalCRLConfig(ctx context.Context, s logical.Storage, mapping *localCRL
 		return err
 	}
 
-	// Update `LastModified`
-	mapping.LastModified = time.Now()
-
 	return s.Put(ctx, json)
 }
 
@@ -830,16 +827,18 @@ func resolveIssuerCRLPath(ctx context.Context, b *backend, req *logical.Request,
 		return legacyCRLPath, err
 	}
 
-	// Validations here
-	ifModifiedSinceVal, err := retrieveIfModifiedSinceFromHeaders(req)
+    log.Println("Error is between this line")
+	ifModifiedSinceVal, err := fetchIfModifiedSinceFromHeaders(req)
 	if err != nil {
 		return legacyCRLPath, err
 	}
 
+    log.Printf("LastModified %v ifModifiedSinceVal %v", crlConfig.LastModified, ifModifiedSinceVal)
 	if !crlConfig.LastModified.IsZero() && crlConfig.LastModified.Before(ifModifiedSinceVal) {
 		// Has to respond with a 304 code and with an `Last-Modified` header with the last modified date
 		return legacyCRLPath, fmt.Errorf("crl has not been modified after `if-modified-since` date")
 	}
+    log.Println("And this line")
 
 	if crlId, ok := crlConfig.IssuerIDCRLMap[issuer]; ok && len(crlId) > 0 {
 		return fmt.Sprintf("crls/%v", crlId), nil
