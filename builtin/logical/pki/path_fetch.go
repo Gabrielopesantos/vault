@@ -5,8 +5,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
-	"time"
 
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/helper/errutil"
@@ -312,6 +312,19 @@ reply:
 			if b.Logger().IsWarn() {
 				b.Logger().Warn("possible error, but cannot return in raw response. Note that an empty CA probably means none was configured, and an empty CRL is possibly correct", "error", retErr)
 			}
+
+			if retErr.Error() == "crl has not been modified after `if-modified-since` date" {
+				log.Println("Case where response is 304")
+				retErr = nil
+				response.Data[logical.HTTPStatusCode] = 304
+				// Maybe we could use something like this?
+				crlConfig, _ := getLocalCRLConfig(ctx, req.Storage)
+				response_headers := map[string][]string{
+					"Last-Modified": {crlConfig.LastModified.Format(http.TimeFormat)},
+				}
+				response.Headers = response_headers
+				return
+			}
 		}
 		retErr = nil
 		if len(certificate) > 0 {
@@ -321,12 +334,12 @@ reply:
 		}
 	case retErr != nil:
 		// NOTE: Temporary fix
-		if retErr.Error() == "crl has not been modified after `if-modified-since` date" {
-			log.Println("Case where response is 304")
-			response.Data[logical.HTTPStatusCode] = 304
-			//response.Headers["Last-Modified"] = []string{"Get this date"}
-			return
-		}
+		//if retErr.Error() == "crl has not been modified after `if-modified-since` date" {
+		//log.Println("Case where response is 304")
+		//response.Data[logical.HTTPStatusCode] = 304
+		//response.Headers["Last-Modified"] = []string{"Get this date"}
+		//return
+		//}
 		response = nil
 		return
 	case response == nil:
@@ -343,27 +356,6 @@ reply:
 	}
 
 	return
-}
-
-// fetchIfModifiedSinceFromHeaders - Not here?
-func fetchIfModifiedSinceFromHeaders(req *logical.Request) (time.Time, error) {
-	headersField := "If-Modified-Since"
-	var ifModifiedSinceTimestamp time.Time
-	log.Printf("Request headers\n+%v\n", req.Headers)
-	ifModifiedSinceValue := req.Headers[headersField]
-
-	// Getting an error
-	log.Printf("ifModifiedSinceValue len %v", len(ifModifiedSinceValue))
-	if len(ifModifiedSinceValue) == 0 {
-		return ifModifiedSinceTimestamp, nil
-	}
-
-	ifModifiedSinceTimestamp, err := time.Parse(time.RFC822, ifModifiedSinceValue[0]) // Which date layout do we want?
-	if err != nil {
-		return ifModifiedSinceTimestamp, err
-	}
-
-	return ifModifiedSinceTimestamp, nil
 }
 
 const pathFetchHelpSyn = `

@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"time"
+    "errors"
 
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/sdk/helper/certutil"
@@ -703,8 +704,6 @@ func getLocalCRLConfig(ctx context.Context, s logical.Storage) (*localCRLConfigE
 		mapping.CRLNumberMap = make(map[crlID]int64)
 	}
 
-	log.Printf("Logging at getLocalCRLConfig: %v\n", mapping.LastModified)
-
 	return mapping, nil
 }
 
@@ -827,18 +826,16 @@ func resolveIssuerCRLPath(ctx context.Context, b *backend, req *logical.Request,
 		return legacyCRLPath, err
 	}
 
-    log.Println("Error is between this line")
 	ifModifiedSinceVal, err := fetchIfModifiedSinceFromHeaders(req)
 	if err != nil {
 		return legacyCRLPath, err
 	}
 
-    log.Printf("LastModified %v ifModifiedSinceVal %v", crlConfig.LastModified, ifModifiedSinceVal)
+	log.Printf("LastModified %v ifModifiedSinceVal %v", crlConfig.LastModified, ifModifiedSinceVal)
 	if !crlConfig.LastModified.IsZero() && crlConfig.LastModified.Before(ifModifiedSinceVal) {
 		// Has to respond with a 304 code and with an `Last-Modified` header with the last modified date
 		return legacyCRLPath, fmt.Errorf("crl has not been modified after `if-modified-since` date")
 	}
-    log.Println("And this line")
 
 	if crlId, ok := crlConfig.IssuerIDCRLMap[issuer]; ok && len(crlId) > 0 {
 		return fmt.Sprintf("crls/%v", crlId), nil
@@ -985,4 +982,21 @@ func checkForRolesReferencing(issuerId string, ctx context.Context, storage logi
 	}
 
 	return false, inUseBy, nil
+}
+
+func fetchIfModifiedSinceFromHeaders(req *logical.Request) (time.Time, error) {
+	headersField := "If-Modified-Since"
+	var ifModifiedSinceTimestamp time.Time
+	ifModifiedSinceValue := req.Headers[headersField]
+
+	if len(ifModifiedSinceValue) == 0 {
+		return ifModifiedSinceTimestamp, nil
+	}
+
+	ifModifiedSinceTimestamp, err := time.Parse(time.RFC1123, ifModifiedSinceValue[0])
+	if err != nil {
+		return ifModifiedSinceTimestamp, errors.New("failed to parse given value for 'If-Modified-Since' header")
+	}
+
+	return ifModifiedSinceTimestamp, nil
 }

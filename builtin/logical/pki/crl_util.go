@@ -398,8 +398,8 @@ func buildCRLs(ctx context.Context, b *backend, req *logical.Request, forceNew b
 				crlConfig.IssuerIDCRLMap[issuerId] = crlIdentifier
 			}
 
-            // Update `LastModified`
-            crlConfig.LastModified = time.Now()
+			// Update `LastModified`
+			crlConfig.LastModified = time.Now().In(time.FixedZone("GMT", 0))
 
 			// We always update the CRL Number since we never want to
 			// duplicate numbers and missing numbers is fine.
