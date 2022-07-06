@@ -6,10 +6,8 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
-	"log"
 	"strings"
 	"time"
-    "errors"
 
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/sdk/helper/certutil"
@@ -807,34 +805,19 @@ func resolveIssuerReference(ctx context.Context, s logical.Storage, reference st
 	return IssuerRefNotFound, errutil.UserError{Err: fmt.Sprintf("unable to find PKI issuer for reference: %v", reference)}
 }
 
-func resolveIssuerCRLPath(ctx context.Context, b *backend, req *logical.Request, reference string) (string, error) {
-	log.Println("Entered resolveIsserCRLPath")
+func resolveIssuerCRLPath(ctx context.Context, b *backend, s logical.Storage, reference string) (string, error) {
 	if b.useLegacyBundleCaStorage() {
-		log.Println("using legacy bundle ca storage")
 		return legacyCRLPath, nil
 	}
 
-	issuer, err := resolveIssuerReference(ctx, req.Storage, reference)
-	if err != nil {
-		log.Printf("resolveIssuerReference error: %v", err)
-		return legacyCRLPath, err
-	}
-
-	log.Println("About to call getLocalCRLConfig in resolveIssuerCRLPath")
-	crlConfig, err := getLocalCRLConfig(ctx, req.Storage)
+	issuer, err := resolveIssuerReference(ctx, s, reference)
 	if err != nil {
 		return legacyCRLPath, err
 	}
 
-	ifModifiedSinceVal, err := fetchIfModifiedSinceFromHeaders(req)
+	crlConfig, err := getLocalCRLConfig(ctx, s)
 	if err != nil {
 		return legacyCRLPath, err
-	}
-
-	log.Printf("LastModified %v ifModifiedSinceVal %v", crlConfig.LastModified, ifModifiedSinceVal)
-	if !crlConfig.LastModified.IsZero() && crlConfig.LastModified.Before(ifModifiedSinceVal) {
-		// Has to respond with a 304 code and with an `Last-Modified` header with the last modified date
-		return legacyCRLPath, fmt.Errorf("crl has not been modified after `if-modified-since` date")
 	}
 
 	if crlId, ok := crlConfig.IssuerIDCRLMap[issuer]; ok && len(crlId) > 0 {
@@ -984,19 +967,44 @@ func checkForRolesReferencing(issuerId string, ctx context.Context, storage logi
 	return false, inUseBy, nil
 }
 
-func fetchIfModifiedSinceFromHeaders(req *logical.Request) (time.Time, error) {
-	headersField := "If-Modified-Since"
-	var ifModifiedSinceTimestamp time.Time
-	ifModifiedSinceValue := req.Headers[headersField]
-
-	if len(ifModifiedSinceValue) == 0 {
-		return ifModifiedSinceTimestamp, nil
+// NOTE: ?
+func hasHeader(header string, req *logical.Request) bool {
+	var hasHeader bool
+	headerValue := req.Headers[header]
+	if len(headerValue) > 0 {
+		hasHeader = true
 	}
 
-	ifModifiedSinceTimestamp, err := time.Parse(time.RFC1123, ifModifiedSinceValue[0])
+	return hasHeader
+}
+func parseIfNotModifiedSince(req *logical.Request) (time.Time, error) {
+	headerFieldName := "If-Modified-Since"
+	var headerTimeValue time.Time
+	headerValue := req.Headers[headerFieldName]
+
+	headerTimeValue, err := time.Parse(time.RFC1123, headerValue[0])
 	if err != nil {
-		return ifModifiedSinceTimestamp, errors.New("failed to parse given value for 'If-Modified-Since' header")
+		return headerTimeValue, fmt.Errorf("failed to parse given value for 'If-Modified-Since' header: %v", err)
 	}
 
-	return ifModifiedSinceTimestamp, nil
+	return headerTimeValue, nil
+}
+
+func isIfModifiedSinceBeforeLastModified(ctx context.Context, req *logical.Request) (bool, error) {
+	var before bool
+	ifModifiedSince, err := parseIfNotModifiedSince(req)
+	if err != nil {
+		return before, nil
+	}
+
+	crlConfig, err := getLocalCRLConfig(ctx, req.Storage)
+	if err != nil {
+		return before, nil
+	}
+
+	if !crlConfig.LastModified.IsZero() && crlConfig.LastModified.Before(ifModifiedSince) {
+		before = true
+	}
+
+	return before, nil
 }

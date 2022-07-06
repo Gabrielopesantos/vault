@@ -158,6 +158,7 @@ func (b *backend) pathFetchRead(ctx context.Context, req *logical.Request, data 
 	var certificate []byte
 	var fullChain []byte
 	var revocationTime int64
+	var httpStatusCode int
 	response = &logical.Response{
 		Data: map[string]interface{}{},
 	}
@@ -181,6 +182,17 @@ func (b *backend) pathFetchRead(ctx context.Context, req *logical.Request, data 
 			contentType = "application/pkix-cert"
 		}
 	case req.Path == "crl" || req.Path == "crl/pem":
+		if hasHeader("If-Modified-Since", req) {
+			before, err := isIfModifiedSinceBeforeLastModified(ctx, req)
+			if err != nil || before {
+				retErr = err
+                if before {
+                    httpStatusCode = 304
+                }
+				goto reply
+			}
+		}
+
 		serial = legacyCRLPath
 		contentType = "application/pkix-crl"
 		if req.Path == "crl/pem" {
@@ -301,7 +313,6 @@ func (b *backend) pathFetchRead(ctx context.Context, req *logical.Request, data 
 reply:
 	switch {
 	case len(contentType) != 0:
-		log.Println("Len of content type is different than 0")
 		response = &logical.Response{
 			Data: map[string]interface{}{
 				logical.HTTPContentType: contentType,
@@ -312,19 +323,6 @@ reply:
 			if b.Logger().IsWarn() {
 				b.Logger().Warn("possible error, but cannot return in raw response. Note that an empty CA probably means none was configured, and an empty CRL is possibly correct", "error", retErr)
 			}
-
-			if retErr.Error() == "crl has not been modified after `if-modified-since` date" {
-				log.Println("Case where response is 304")
-				retErr = nil
-				response.Data[logical.HTTPStatusCode] = 304
-				// Maybe we could use something like this?
-				crlConfig, _ := getLocalCRLConfig(ctx, req.Storage)
-				response_headers := map[string][]string{
-					"Last-Modified": {crlConfig.LastModified.Format(http.TimeFormat)},
-				}
-				response.Headers = response_headers
-				return
-			}
 		}
 		retErr = nil
 		if len(certificate) > 0 {
@@ -333,19 +331,29 @@ reply:
 			response.Data[logical.HTTPStatusCode] = 204
 		}
 	case retErr != nil:
-		// NOTE: Temporary fix
-		//if retErr.Error() == "crl has not been modified after `if-modified-since` date" {
-		//log.Println("Case where response is 304")
-		//response.Data[logical.HTTPStatusCode] = 304
-		//response.Headers["Last-Modified"] = []string{"Get this date"}
-		//return
-		//}
 		response = nil
 		return
 	case response == nil:
 		return
 	case response.IsError():
 		return response, nil
+	case httpStatusCode != 0:
+		response = &logical.Response{
+			Data: map[string]interface{}{
+				logical.HTTPContentType: contentType,
+				logical.HTTPRawBody:     certificate,
+			},
+		}
+		retErr = nil
+		response.Data[logical.HTTPStatusCode] = httpStatusCode
+		switch {
+		case httpStatusCode == 304:
+			crlConfig, _ := getLocalCRLConfig(ctx, req.Storage)
+			response_headers := map[string][]string{
+				"Last-Modified": {crlConfig.LastModified.Format(http.TimeFormat)},
+			}
+			response.Headers = response_headers
+		}
 	default:
 		response.Data["certificate"] = string(certificate)
 		response.Data["revocation_time"] = revocationTime

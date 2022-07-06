@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/url"
 	"regexp"
@@ -155,7 +154,6 @@ func fetchCAInfoByIssuerId(ctx context.Context, b *backend, req *logical.Request
 // Support for fetching CA certificates was removed, due to the new issuers
 // changes.
 func fetchCertBySerial(ctx context.Context, b *backend, req *logical.Request, prefix, serial string) (*logical.StorageEntry, error) {
-	log.Println("in fetchCertBySerial")
 	var path, legacyPath string
 	var err error
 	var certEntry *logical.StorageEntry
@@ -170,11 +168,10 @@ func fetchCertBySerial(ctx context.Context, b *backend, req *logical.Request, pr
 		legacyPath = "revoked/" + colonSerial
 		path = "revoked/" + hyphenSerial
 	case serial == legacyCRLPath:
-		log.Println("In case where serial equals `crl`")
 		if err = b.crlBuilder.rebuildIfForced(ctx, b, req); err != nil {
 			return nil, err
 		}
-		path, err = resolveIssuerCRLPath(ctx, b, req, defaultRef)
+		path, err = resolveIssuerCRLPath(ctx, b, req.Storage, defaultRef)
 		if err != nil {
 			return nil, err
 		}
