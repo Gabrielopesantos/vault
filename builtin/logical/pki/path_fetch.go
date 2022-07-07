@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/pem"
 	"fmt"
-	"log"
-	"net/http"
 	"strings"
 
 	"github.com/hashicorp/vault/sdk/framework"
@@ -159,6 +157,7 @@ func (b *backend) pathFetchRead(ctx context.Context, req *logical.Request, data 
 	var fullChain []byte
 	var revocationTime int64
 	var httpStatusCode int
+	responseHeaders := map[string][]string{}
 	response = &logical.Response{
 		Data: map[string]interface{}{},
 	}
@@ -183,12 +182,12 @@ func (b *backend) pathFetchRead(ctx context.Context, req *logical.Request, data 
 		}
 	case req.Path == "crl" || req.Path == "crl/pem":
 		if hasHeader("If-Modified-Since", req) {
-			before, err := isIfModifiedSinceBeforeLastModified(ctx, req)
+			before, err := isIfModifiedSinceBeforeLastModified(ctx, req, responseHeaders)
 			if err != nil || before {
 				retErr = err
-                if before {
-                    httpStatusCode = 304
-                }
+				if before {
+					httpStatusCode = 304
+				}
 				goto reply
 			}
 		}
@@ -348,11 +347,7 @@ reply:
 		response.Data[logical.HTTPStatusCode] = httpStatusCode
 		switch {
 		case httpStatusCode == 304:
-			crlConfig, _ := getLocalCRLConfig(ctx, req.Storage)
-			response_headers := map[string][]string{
-				"Last-Modified": {crlConfig.LastModified.Format(http.TimeFormat)},
-			}
-			response.Headers = response_headers
+			response.Headers = responseHeaders
 		}
 	default:
 		response.Data["certificate"] = string(certificate)

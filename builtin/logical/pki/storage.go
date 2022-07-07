@@ -6,6 +6,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -967,7 +968,6 @@ func checkForRolesReferencing(issuerId string, ctx context.Context, storage logi
 	return false, inUseBy, nil
 }
 
-// NOTE: ?
 func hasHeader(header string, req *logical.Request) bool {
 	var hasHeader bool
 	headerValue := req.Headers[header]
@@ -977,6 +977,7 @@ func hasHeader(header string, req *logical.Request) bool {
 
 	return hasHeader
 }
+
 func parseIfNotModifiedSince(req *logical.Request) (time.Time, error) {
 	headerFieldName := "If-Modified-Since"
 	var headerTimeValue time.Time
@@ -984,26 +985,28 @@ func parseIfNotModifiedSince(req *logical.Request) (time.Time, error) {
 
 	headerTimeValue, err := time.Parse(time.RFC1123, headerValue[0])
 	if err != nil {
-		return headerTimeValue, fmt.Errorf("failed to parse given value for 'If-Modified-Since' header: %v", err)
+		return headerTimeValue, fmt.Errorf("failed to parse given value for '%s' header: %v", headerFieldName, err)
 	}
 
 	return headerTimeValue, nil
 }
 
-func isIfModifiedSinceBeforeLastModified(ctx context.Context, req *logical.Request) (bool, error) {
+func isIfModifiedSinceBeforeLastModified(ctx context.Context, req *logical.Request, responseHeaders map[string][]string) (bool, error) {
 	var before bool
 	ifModifiedSince, err := parseIfNotModifiedSince(req)
 	if err != nil {
-		return before, nil
+		return before, err
 	}
 
 	crlConfig, err := getLocalCRLConfig(ctx, req.Storage)
 	if err != nil {
-		return before, nil
+		return before, err
 	}
 
-	if !crlConfig.LastModified.IsZero() && crlConfig.LastModified.Before(ifModifiedSince) {
+	lastModified := crlConfig.LastModified
+	if !lastModified.IsZero() && lastModified.Before(ifModifiedSince) {
 		before = true
+		responseHeaders["Last-Modified"] = []string{lastModified.Format(http.TimeFormat)}
 	}
 
 	return before, nil
