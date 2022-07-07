@@ -416,6 +416,9 @@ func buildCRLs(ctx context.Context, b *backend, req *logical.Request, forceNew b
 			crlNumber := crlConfig.CRLNumberMap[crlIdentifier]
 			crlConfig.CRLNumberMap[crlIdentifier] += 1
 
+            // Update `LastModified`
+			crlConfig.LastModified = time.Now().In(time.FixedZone("GMT", 0))
+
 			// Lastly, build the CRL.
 			if err := buildCRL(sc, forceNew, representative, revokedCerts, crlIdentifier, crlNumber); err != nil {
 				return fmt.Errorf("error building CRLs: unable to build CRL for issuer (%v): %v", representative, err)

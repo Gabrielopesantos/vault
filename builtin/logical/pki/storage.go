@@ -6,7 +6,9 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/sdk/helper/certutil"
@@ -30,6 +32,9 @@ const (
 
 	maxRolesToScanOnIssuerChange = 100
 	maxRolesToFindOnIssuerChange = 10
+
+	headerIfModifiedSince = "If-Modified-Since"
+	headerLastModified    = "Last-Modified"
 )
 
 type keyID string
@@ -150,6 +155,7 @@ type issuerEntry struct {
 type localCRLConfigEntry struct {
 	IssuerIDCRLMap map[issuerID]crlID `json:"issuer_id_crl_map"`
 	CRLNumberMap   map[crlID]int64    `json:"crl_number_map"`
+	LastModified   time.Time          `json:"last_modified"`
 }
 
 type keyConfigEntry struct {
@@ -977,4 +983,47 @@ func (sc *storageContext) checkForRolesReferencing(issuerId string) (timeout boo
 	}
 
 	return false, inUseBy, nil
+}
+
+func hasHeader(header string, req *logical.Request) bool {
+	var hasHeader bool
+	headerValue := req.Headers[header]
+	if len(headerValue) > 0 {
+		hasHeader = true
+	}
+
+	return hasHeader
+}
+
+func parseIfNotModifiedSince(req *logical.Request) (time.Time, error) {
+	var headerTimeValue time.Time
+	headerValue := req.Headers[headerIfModifiedSince]
+
+	headerTimeValue, err := time.Parse(time.RFC1123, headerValue[0])
+	if err != nil {
+		return headerTimeValue, fmt.Errorf("failed to parse given value for '%s' header: %v", headerIfModifiedSince, err)
+	}
+
+	return headerTimeValue, nil
+}
+
+func isIfModifiedSinceBeforeLastModified(sc *storageContext, req *logical.Request, responseHeaders map[string][]string) (bool, error) {
+	var before bool
+	ifModifiedSince, err := parseIfNotModifiedSince(req)
+	if err != nil {
+		return before, err
+	}
+
+	crlConfig, err := sc.getLocalCRLConfig()
+	if err != nil {
+		return before, err
+	}
+
+	lastModified := crlConfig.LastModified
+	if !lastModified.IsZero() && lastModified.Before(ifModifiedSince) {
+		before = true
+		responseHeaders[headerLastModified] = []string{lastModified.Format(http.TimeFormat)}
+	}
+
+	return before, nil
 }
