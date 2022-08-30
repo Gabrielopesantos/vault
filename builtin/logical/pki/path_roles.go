@@ -440,6 +440,12 @@ The value format should be given in UTC format YYYY-MM-ddTHH:MM:SSZ.`,
 serviced by this role.`,
 				Default: defaultRef,
 			},
+			"ec_params": {
+				Type: framework.TypeBool,
+				// Better description?
+				Description: `If True, also includes EC PARAMETERS section in the private keys of EC type`,
+				Default:     false,
+			},
 		},
 
 		Operations: map[logical.Operation]framework.OperationHandler{
@@ -703,6 +709,7 @@ func (b *backend) pathRoleCreate(ctx context.Context, req *logical.Request, data
 		NotBeforeDuration:             time.Duration(data.Get("not_before_duration").(int)) * time.Second,
 		NotAfter:                      data.Get("not_after").(string),
 		Issuer:                        data.Get("issuer_ref").(string),
+		ECParams:                      data.Get("ec_params").(bool),
 	}
 
 	allowedOtherSANs := data.Get("allowed_other_sans").([]string)
@@ -903,6 +910,7 @@ func (b *backend) pathRolePatch(ctx context.Context, req *logical.Request, data 
 		NotBeforeDuration:             getTimeWithExplicitDefault(data, "not_before_duration", oldEntry.NotBeforeDuration),
 		NotAfter:                      getWithExplicitDefault(data, "not_after", oldEntry.NotAfter).(string),
 		Issuer:                        getWithExplicitDefault(data, "issuer_ref", oldEntry.Issuer).(string),
+		ECParams:                      getWithExplicitDefault(data, "ec_params", oldEntry.ECParams).(bool),
 	}
 
 	allowedOtherSANsData, wasSet := data.GetOk("allowed_other_sans")
@@ -1108,6 +1116,7 @@ type roleEntry struct {
 	NotBeforeDuration             time.Duration `json:"not_before_duration"`
 	NotAfter                      string        `json:"not_after"`
 	Issuer                        string        `json:"issuer"`
+	ECParams                      bool          `json:"ec_params"`
 }
 
 func (r *roleEntry) ToResponseData() map[string]interface{} {
@@ -1157,6 +1166,7 @@ func (r *roleEntry) ToResponseData() map[string]interface{} {
 		"not_before_duration":                int64(r.NotBeforeDuration.Seconds()),
 		"not_after":                          r.NotAfter,
 		"issuer_ref":                         r.Issuer,
+		"ec_params":                          r.ECParams,
 	}
 	if r.MaxPathLength != nil {
 		responseData["max_path_length"] = r.MaxPathLength

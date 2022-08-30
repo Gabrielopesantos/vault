@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+    "log"
 	"math/big"
 	"net"
 	"net/url"
@@ -345,6 +346,10 @@ func generatePrivateKey(keyType string, keyBits int, container ParsedPrivateKeyC
 			return errutil.InternalError{Err: fmt.Sprintf("error generating EC private key: %v", err)}
 		}
 		privateKeyBytes, err = x509.MarshalECPrivateKey(privateKey.(*ecdsa.PrivateKey))
+		// Returning everything for now
+		ecParamtersBytes := pem.EncodeToMemory(&pem.Block{Type: "EC PARAMETERS", Bytes: privateKeyBytes})
+        log.Printf("%s", ecParamtersBytes)
+		//privateKeyBytes = append(ecParamtersBytes, privateKeyBytes...) // Not a safe way to concat slices
 		if err != nil {
 			return errutil.InternalError{Err: fmt.Sprintf("error marshalling EC private key: %v", err)}
 		}
@@ -355,6 +360,9 @@ func generatePrivateKey(keyType string, keyBits int, container ParsedPrivateKeyC
 			return errutil.InternalError{Err: fmt.Sprintf("error generating ed25519 private key: %v", err)}
 		}
 		privateKeyBytes, err = x509.MarshalPKCS8PrivateKey(privateKey.(ed25519.PrivateKey))
+		// Returning everything for now
+		//ecParamtersBytes := pem.EncodeToMemory(&pem.Block{Type: "EC PARAMETERS", Bytes: privateKeyBytes})
+		//privateKeyBytes = append(ecParamtersBytes, privateKeyBytes...) // Not a safe way to concat slices
 		if err != nil {
 			return errutil.InternalError{Err: fmt.Sprintf("error marshalling Ed25519 private key: %v", err)}
 		}

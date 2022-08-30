@@ -328,6 +328,7 @@ func (b *backend) pathIssueSignCert(ctx context.Context, req *logical.Request, d
 		return nil, fmt.Errorf("error converting raw signing bundle to cert bundle: %w", err)
 	}
 
+    // NOTE: here?
 	cb, err := parsedBundle.ToCertBundle()
 	if err != nil {
 		return nil, fmt.Errorf("error converting raw cert bundle to cert bundle: %w", err)

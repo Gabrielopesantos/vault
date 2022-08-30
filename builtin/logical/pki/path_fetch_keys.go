@@ -155,6 +155,8 @@ func (b *backend) pathGetKeyHandler(ctx context.Context, req *logical.Request, d
 		keyTypeParam: string(key.PrivateKeyType),
 	}
 
+	// Depending on keyType param we do something? How do we know keyBits?
+
 	if key.isManagedPrivateKey() {
 		managedKeyUUID, err := key.getManagedKeyUUID()
 		if err != nil {
