@@ -5141,11 +5141,12 @@ func TestBackend_IfModifiedSinceHeaders(t *testing.T) {
 
 	// Generate an internal CA. This one is the default.
 	resp, err := client.Logical().Write("pki/root/generate/internal", map[string]interface{}{
-		"ttl":         "40h",
+		"ttl":         "61h",
 		"common_name": "Root X1",
 		"key_type":    "ec",
 		"issuer_name": "old-root",
 	})
+	require.Equal(t, 1, len(resp.Warnings)) // MaxTTL override warning
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Data)

@@ -399,6 +399,10 @@ func (b *backend) pathIssueSignCert(ctx context.Context, req *logical.Request, d
 			})
 		resp.Secret.TTL = parsedBundle.Certificate.NotAfter.Sub(time.Now())
 	}
+	ttl := time.Duration(data.Get("ttl").(int)) * time.Second
+	if ttl > role.MaxTTL {
+		resp.AddWarning("`ttl` provided is higher than `max_ttl` defined, value overriden")
+	}
 
 	if data.Get("private_key_format").(string) == "pkcs8" {
 		err = convertRespToPKCS8(resp)
