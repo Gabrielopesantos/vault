@@ -1305,7 +1305,7 @@ func (p *Policy) VerifySignatureWithOptions(context, input []byte, sig string, o
 	}
 }
 
-func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte, randReader io.Reader) error {
+func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte, isPublicKey bool, randReader io.Reader) error {
 	now := time.Now()
 	entry := KeyEntry{
 		CreationTime:           now,
@@ -1320,6 +1320,7 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 		entry.HMACKey = hmacKey
 	}
 
+	// We are going to have to do some stuff in here
 	if (p.Type == KeyType_AES128_GCM96 && len(key) != 16) ||
 		((p.Type == KeyType_AES256_GCM96 || p.Type == KeyType_ChaCha20_Poly1305) && len(key) != 32) ||
 		(p.Type == KeyType_HMAC && (len(key) < HmacMinKeySize || len(key) > HmacMaxKeySize)) {
@@ -1332,6 +1333,8 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 			p.KeySize = len(key)
 		}
 	} else {
+		// If key is asymmetric
+		//x509.ParsePKIXPublicKey() // ? If we use ParsePKCS1PublicKey only `RSA` is supported?
 		parsedPrivateKey, err := x509.ParsePKCS8PrivateKey(key)
 		if err != nil {
 			if strings.Contains(err.Error(), "unknown elliptic curve") {

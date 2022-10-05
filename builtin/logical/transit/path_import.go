@@ -89,6 +89,11 @@ being automatically rotated. A value of 0
 (default) disables automatic rotation for the
 key.`,
 			},
+            "is_public_key": {
+                Type: framework.TypeBool,
+                Default: false,
+                Description: `Enables importing a public key`, // What else?
+            },
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
 			logical.UpdateOperation: b.pathImportWrite,
@@ -126,6 +131,10 @@ ephemeral AES key. Can be one of "SHA1", "SHA224", "SHA256" (default), "SHA384",
 	}
 }
 
+/*
+Does it make sense to make a distinction between asymetric private and public keys?
+Do we need to add additional key types?
+*/
 func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	name := d.Get("name").(string)
 	derived := d.Get("derived").(bool)
@@ -136,6 +145,7 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 	autoRotatePeriod := time.Second * time.Duration(d.Get("auto_rotate_period").(int))
 	ciphertextString := d.Get("ciphertext").(string)
 	allowRotation := d.Get("allow_rotation").(bool)
+    isPublicKey := d.Get("is_public_key").(bool)
 
 	// Ensure the caller didn't supply "convergent_encryption" as a field, since it's not supported on import.
 	if _, ok := d.Raw["convergent_encryption"]; ok {
@@ -210,7 +220,7 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		return nil, err
 	}
 
-	err = b.lm.ImportPolicy(ctx, polReq, key, b.GetRandomReader())
+	err = b.lm.ImportPolicy(ctx, polReq, key, isPublicKey, b.GetRandomReader())
 	if err != nil {
 		return nil, err
 	}

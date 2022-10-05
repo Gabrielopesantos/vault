@@ -451,7 +451,7 @@ func (lm *LockManager) GetPolicy(ctx context.Context, req PolicyRequest, rand io
 	return
 }
 
-func (lm *LockManager) ImportPolicy(ctx context.Context, req PolicyRequest, key []byte, rand io.Reader) error {
+func (lm *LockManager) ImportPolicy(ctx context.Context, req PolicyRequest, key []byte, isPublicKey bool, rand io.Reader) error {
 	var p *Policy
 	var err error
 	var ok bool
@@ -495,7 +495,7 @@ func (lm *LockManager) ImportPolicy(ctx context.Context, req PolicyRequest, key 
 		}
 	}
 
-	err = p.Import(ctx, req.Storage, key, rand)
+	err = p.Import(ctx, req.Storage, key, isPublicKey, rand) // This is the method that imports the functions
 	if err != nil {
 		return fmt.Errorf("error importing key: %s", err)
 	}
