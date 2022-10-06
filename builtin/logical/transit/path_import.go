@@ -89,11 +89,12 @@ being automatically rotated. A value of 0
 (default) disables automatic rotation for the
 key.`,
 			},
-            "is_public_key": {
-                Type: framework.TypeBool,
-                Default: false,
-                Description: `Enables importing a public key`, // What else?
-            },
+			"is_public_key": {
+				Type:        framework.TypeBool,
+				Default:     false,
+				Description: `Enables importing a public key`, // What else?
+				Required:    false,
+			},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
 			logical.UpdateOperation: b.pathImportWrite,
@@ -122,6 +123,12 @@ with the wrapping key and then concatenated with the import key, wrapped by the 
 				Description: `The hash function used as a random oracle in the OAEP wrapping of the user-generated,
 ephemeral AES key. Can be one of "SHA1", "SHA224", "SHA256" (default), "SHA384", or "SHA512"`,
 			},
+			"is_public_key": {
+				Type:        framework.TypeBool,
+				Default:     false,
+				Description: `Enables importing a public key`, // What else?
+				Required:    false,
+			},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
 			logical.UpdateOperation: b.pathImportVersionWrite,
@@ -145,7 +152,7 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 	autoRotatePeriod := time.Second * time.Duration(d.Get("auto_rotate_period").(int))
 	ciphertextString := d.Get("ciphertext").(string)
 	allowRotation := d.Get("allow_rotation").(bool)
-    isPublicKey := d.Get("is_public_key").(bool)
+	isPublicKey := d.Get("is_public_key").(bool)
 
 	// Ensure the caller didn't supply "convergent_encryption" as a field, since it's not supported on import.
 	if _, ok := d.Raw["convergent_encryption"]; ok {
@@ -232,6 +239,7 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 	name := d.Get("name").(string)
 	hashFnStr := d.Get("hash_function").(string)
 	ciphertextString := d.Get("ciphertext").(string)
+	isPublicKey := d.Get("is_public_key").(bool)
 
 	polReq := keysutil.PolicyRequest{
 		Storage: req.Storage,
@@ -271,7 +279,7 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 	if err != nil {
 		return nil, err
 	}
-	err = p.Import(ctx, req.Storage, importKey, b.GetRandomReader())
+	err = p.Import(ctx, req.Storage, importKey, isPublicKey, b.GetRandomReader())
 	if err != nil {
 		return nil, err
 	}

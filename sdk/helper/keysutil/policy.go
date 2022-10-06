@@ -1320,7 +1320,7 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 		entry.HMACKey = hmacKey
 	}
 
-	// We are going to have to do some stuff in here
+	// Test in failing in this condition
 	if (p.Type == KeyType_AES128_GCM96 && len(key) != 16) ||
 		((p.Type == KeyType_AES256_GCM96 || p.Type == KeyType_ChaCha20_Poly1305) && len(key) != 32) ||
 		(p.Type == KeyType_HMAC && (len(key) < HmacMinKeySize || len(key) > HmacMaxKeySize)) {
@@ -1333,20 +1333,29 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 			p.KeySize = len(key)
 		}
 	} else {
-		// If key is asymmetric
 		//x509.ParsePKIXPublicKey() // ? If we use ParsePKCS1PublicKey only `RSA` is supported?
-		parsedPrivateKey, err := x509.ParsePKCS8PrivateKey(key)
-		if err != nil {
-			if strings.Contains(err.Error(), "unknown elliptic curve") {
-				var edErr error
-				parsedPrivateKey, edErr = ParsePKCS8Ed25519PrivateKey(key)
-				if edErr != nil {
-					return fmt.Errorf("error parsing asymmetric key:\n - assuming contents are an ed25519 private key: %s\n - original error: %v", edErr, err)
-				}
+		var parsedPrivateKey any
+		var err error
+		if !isPublicKey {
+			// If key is asymmetric
+			parsedPrivateKey, err = x509.ParsePKCS8PrivateKey(key)
+			if err != nil {
+				if strings.Contains(err.Error(), "unknown elliptic curve") {
+					var edErr error
+					parsedPrivateKey, edErr = ParsePKCS8Ed25519PrivateKey(key)
+					if edErr != nil {
+						return fmt.Errorf("error parsing asymmetric key:\n - assuming contents are an ed25519 private key: %s\n - original error: %v", edErr, err)
+					}
 
-				// Parsing as Ed25519-in-PKCS8-ECPrivateKey succeeded!
-			} else {
-				return fmt.Errorf("error parsing asymmetric key: %s", err)
+					// Parsing as Ed25519-in-PKCS8-ECPrivateKey succeeded!
+				} else {
+					return fmt.Errorf("error parsing asymmetric key: %s", err)
+				}
+			}
+		} else {
+			parsedPrivateKey, err = x509.ParsePKIXPublicKey(key)
+			if err != nil {
+				return fmt.Errorf("error parsing public key: %s", err)
 			}
 		}
 
