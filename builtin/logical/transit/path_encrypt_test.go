@@ -2,13 +2,18 @@ package transit
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/vault/sdk/helper/keysutil"
 
+	uuid "github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/sdk/logical"
 	"github.com/mitchellh/mapstructure"
 )
@@ -664,6 +669,65 @@ func TestTransit_BatchEncryptionCase13(t *testing.T) {
 		Data:      batchData,
 	}
 	_, err = b.HandleRequest(context.Background(), batchReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+} // Case14: Successful encryption with an RSA Public key
+func TestTransit_BatchEncryptionCase14(t *testing.T) {
+	var err error
+
+	b, s := createBackendWithStorage(t)
+
+	wrappingKey, err := b.getWrappingKey(context.Background(), s)
+	if err != nil || wrappingKey == nil {
+		t.Fatalf("failed to retrieve public wrapping key: %s", err)
+	}
+	privWrappingKey := wrappingKey.Keys[strconv.Itoa(wrappingKey.LatestVersion)].RSAKey
+	pubWrappingKey := &privWrappingKey.PublicKey
+
+	keyType := "rsa-2048"
+	keyID, err := uuid.GenerateUUID()
+	if err != nil {
+		t.Fatalf("failed to generate key ID: %s", err)
+	}
+
+	// Hardcoded for now
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	targetKey := privateKey.Public()
+
+	// Import key
+	importBlob := wrapTargetKeyForImport(t, pubWrappingKey, targetKey, keyType, "SHA256", true)
+	req := &logical.Request{
+		Storage:   s,
+		Operation: logical.UpdateOperation,
+		Path:      fmt.Sprintf("keys/%s/import", keyID),
+		Data: map[string]interface{}{
+			"allow_rotation": false,
+			"ciphertext":     importBlob,
+			"type":           keyType,
+			"is_public_key":  true,
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to import public key: %s", err)
+	}
+
+	batchInput := []interface{}{
+		map[string]interface{}{"plaintext": "bXkgc2VjcmV0IGRhdGE=", "nonce": "YmFkbm9uY2U="},
+	}
+
+	batchData := map[string]interface{}{
+		"batch_input": batchInput,
+	}
+	batchReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      fmt.Sprintf("encrypt/%s", keyID),
+		Storage:   s,
+		Data:      batchData,
+	}
+    _, err = b.HandleRequest(context.Background(), batchReq)
 	if err != nil {
 		t.Fatal(err)
 	}
