@@ -388,8 +388,9 @@ func TestTransit_Import(t *testing.T) {
 			}
 		},
 	)
+
 	t.Run(
-		"import public key", // ?,
+        "import rsa public key",
 		func(t *testing.T) {
 			keyType := "rsa-2048"
 			keyID, err := uuid.GenerateUUID()
@@ -400,7 +401,6 @@ func TestTransit_Import(t *testing.T) {
 			// Hardcoded for now
 			privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 			targetKey := privateKey.Public()
-			//targetKey := getKey(t, keyType).Public()
 
 			// Import key
 			importBlob := wrapTargetKeyForImport(t, pubWrappingKey, targetKey, keyType, "SHA256", true)
@@ -411,6 +411,7 @@ func TestTransit_Import(t *testing.T) {
 				Data: map[string]interface{}{
 					"allow_rotation": false,
 					"ciphertext":     importBlob,
+					"type":           keyType,
 					"is_public_key":  true,
 				},
 			}

@@ -197,6 +197,7 @@ type KeyEntry struct {
 	EC_D *big.Int `json:"ec_d"`
 
 	RSAKey *rsa.PrivateKey `json:"rsa_key"`
+    RSAPublicKey *rsa.PublicKey `json:"rsa_public_key"`
 
 	// The public key in an appropriate format for the type of key
 	FormattedPublicKey string `json:"public_key"`
@@ -208,6 +209,7 @@ type KeyEntry struct {
 	// This is deprecated (but still filled) in favor of the value above which
 	// is more precise
 	DeprecatedCreationTime int64 `json:"creation_time"`
+    IsPublicKey bool `json:"is_public_key"`
 }
 
 // deprecatedKeyEntryMap is used to allow JSON marshal/unmarshal
@@ -1333,11 +1335,9 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 			p.KeySize = len(key)
 		}
 	} else {
-		//x509.ParsePKIXPublicKey() // ? If we use ParsePKCS1PublicKey only `RSA` is supported?
 		var parsedPrivateKey any
 		var err error
 		if !isPublicKey {
-			// If key is asymmetric
 			parsedPrivateKey, err = x509.ParsePKCS8PrivateKey(key)
 			if err != nil {
 				if strings.Contains(err.Error(), "unknown elliptic curve") {
@@ -1419,6 +1419,12 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 			}
 
 			entry.RSAKey = rsaKey
+		case *rsa.PublicKey:
+			// Check types if is RSA Public key?
+            // Let's assume that we won't have problems for now
+            rsaPublicKey := parsedPrivateKey.(*rsa.PublicKey)
+            entry.RSAPublicKey = rsaPublicKey
+            entry.IsPublicKey = true
 		default:
 			return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedPrivateKey)
 		}
@@ -1919,8 +1925,13 @@ func (p *Policy) EncryptWithFactory(ver int, context []byte, nonce []byte, value
 		if err != nil {
 			return "", err
 		}
-		key := keyEntry.RSAKey
-		ciphertext, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, &key.PublicKey, plaintext, nil)
+        var key *rsa.PublicKey
+        if keyEntry.IsPublicKey {
+		    key = keyEntry.RSAPublicKey
+        } else {
+		    key = &keyEntry.RSAKey.PublicKey
+        }
+		ciphertext, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, key, plaintext, nil)
 		if err != nil {
 			return "", errutil.InternalError{Err: fmt.Sprintf("failed to RSA encrypt the plaintext: %v", err)}
 		}
