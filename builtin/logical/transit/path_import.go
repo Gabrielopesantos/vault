@@ -89,6 +89,11 @@ being automatically rotated. A value of 0
 (default) disables automatic rotation for the
 key.`,
 			},
+			"public_key": {
+				Type: framework.TypeString,
+				// NOTE: Description (import)
+				Description: `Public key to be imported`,
+			},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
 			logical.UpdateOperation: b.pathImportWrite,
@@ -117,6 +122,11 @@ with the wrapping key and then concatenated with the import key, wrapped by the 
 				Description: `The hash function used as a random oracle in the OAEP wrapping of the user-generated,
 ephemeral AES key. Can be one of "SHA1", "SHA224", "SHA256" (default), "SHA384", or "SHA512"`,
 			},
+			//"public_key": {
+			//Type: framework.TypeString,
+			//// NOTE: Description (import_version)
+			//Description: `Public key to be imported`,
+			//},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
 			logical.UpdateOperation: b.pathImportVersionWrite,
@@ -136,6 +146,8 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 	autoRotatePeriod := time.Second * time.Duration(d.Get("auto_rotate_period").(int))
 	ciphertextString := d.Get("ciphertext").(string)
 	allowRotation := d.Get("allow_rotation").(bool)
+	publicKeyString := d.Get("public_key").(string)
+	var isPublicKey bool
 
 	// Ensure the caller didn't supply "convergent_encryption" as a field, since it's not supported on import.
 	if _, ok := d.Raw["convergent_encryption"]; ok {
@@ -144,6 +156,17 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 
 	if autoRotatePeriod > 0 && !allowRotation {
 		return nil, errors.New("allow_rotation must be set to true if auto-rotation is enabled")
+	}
+
+	/*
+	   NOTE: Check if only ciphertextString or publicKeyString were provided
+	   Works but not be the best way to validate this
+	*/
+	if ciphertextString != "" && publicKeyString != "" {
+		// NOTE: Address error message
+		return nil, errors.New("cannot import ciphertext and public_key in the same request")
+	} else if ciphertextString == "" {
+		isPublicKey = true
 	}
 
 	polReq := keysutil.PolicyRequest{
@@ -156,6 +179,8 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		AllowImportedKeyRotation: allowRotation,
 	}
 
+	// keyType is still required when importing a public_key
+	// Should we check if the public key is only for the supported types (RSA)?
 	switch strings.ToLower(keyType) {
 	case "aes128-gcm96":
 		polReq.KeyType = keysutil.KeyType_AES128_GCM96
@@ -183,10 +208,33 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		return logical.ErrorResponse(fmt.Sprintf("unknown key type: %v", keyType)), logical.ErrInvalidRequest
 	}
 
-	hashFn, err := parseHashFn(hashFnStr)
-	if err != nil {
-		return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
+	if !polReq.KeyType.SupportsImportPublicKey() {
+		// NOTE: Review error desc
+		return nil, errors.New("provided type does not support public_key import")
 	}
+
+	// NOTE: None of this is needed if we are importing a public key
+	// Maybe all of this could go into its own function (decryptCiphertext)
+	var key []byte
+	if !isPublicKey {
+		hashFn, err := parseHashFn(hashFnStr)
+		if err != nil {
+			return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
+		}
+
+		ciphertext, err := base64.StdEncoding.DecodeString(ciphertextString)
+		if err != nil {
+			return nil, err
+		}
+
+		key, err = b.decryptImportedKey(ctx, req.Storage, ciphertext, hashFn)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		key = []byte(publicKeyString)
+	}
+	// None of this is needed if we are importing a public key
 
 	p, _, err := b.GetPolicy(ctx, polReq, b.GetRandomReader())
 	if err != nil {
@@ -200,17 +248,7 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		return nil, errors.New("the import path cannot be used with an existing key; use import-version to rotate an existing imported key")
 	}
 
-	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextString)
-	if err != nil {
-		return nil, err
-	}
-
-	key, err := b.decryptImportedKey(ctx, req.Storage, ciphertext, hashFn)
-	if err != nil {
-		return nil, err
-	}
-
-	err = b.lm.ImportPolicy(ctx, polReq, key, b.GetRandomReader())
+	err = b.lm.ImportPolicy(ctx, polReq, key, isPublicKey, b.GetRandomReader())
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +299,8 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 	if err != nil {
 		return nil, err
 	}
-	err = p.Import(ctx, req.Storage, importKey, b.GetRandomReader())
+	// NOTE: Hardcoded for now
+	err = p.Import(ctx, req.Storage, importKey, false, b.GetRandomReader())
 	if err != nil {
 		return nil, err
 	}

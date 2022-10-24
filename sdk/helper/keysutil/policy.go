@@ -156,6 +156,16 @@ func (kt KeyType) AssociatedDataSupported() bool {
 	case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305:
 		return true
 	}
+
+    return false
+}
+
+func (kt KeyType) SupportsImportPublicKey() bool {
+	switch kt {
+	case KeyType_RSA2048, KeyType_RSA3072, KeyType_RSA4096:
+		return true
+	}
+
 	return false
 }
 
@@ -208,7 +218,8 @@ type KeyEntry struct {
 	EC_Y *big.Int `json:"ec_y"`
 	EC_D *big.Int `json:"ec_d"`
 
-	RSAKey *rsa.PrivateKey `json:"rsa_key"`
+	RSAKey       *rsa.PrivateKey `json:"rsa_key"`
+	RSAPublicKey *rsa.PublicKey  `json:"rsa_public_key"`
 
 	// The public key in an appropriate format for the type of key
 	FormattedPublicKey string `json:"public_key"`
@@ -1338,7 +1349,8 @@ func (p *Policy) VerifySignatureWithOptions(context, input []byte, sig string, o
 	}
 }
 
-func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte, randReader io.Reader) error {
+func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte, isPublicKey bool, randReader io.Reader) error {
+	// NOTE: Currently breaking tests as aren't considering the `isPublicKey` param
 	now := time.Now()
 	entry := KeyEntry{
 		CreationTime:           now,
@@ -1353,6 +1365,7 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 		entry.HMACKey = hmacKey
 	}
 
+	// NOTE: If we are checking for public keys, this isn't required
 	if (p.Type == KeyType_AES128_GCM96 && len(key) != 16) ||
 		((p.Type == KeyType_AES256_GCM96 || p.Type == KeyType_ChaCha20_Poly1305) && len(key) != 32) ||
 		(p.Type == KeyType_HMAC && (len(key) < HmacMinKeySize || len(key) > HmacMaxKeySize)) {
@@ -1365,28 +1378,39 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 			p.KeySize = len(key)
 		}
 	} else {
-		parsedPrivateKey, err := x509.ParsePKCS8PrivateKey(key)
-		if err != nil {
-			if strings.Contains(err.Error(), "unknown elliptic curve") {
-				var edErr error
-				parsedPrivateKey, edErr = ParsePKCS8Ed25519PrivateKey(key)
-				if edErr != nil {
-					return fmt.Errorf("error parsing asymmetric key:\n - assuming contents are an ed25519 private key: %s\n - original error: %v", edErr, err)
-				}
+		// NOTE: Init these vars here for now
+		var parsedKey any
+		var err error
+		if !isPublicKey {
+			parsedKey, err = x509.ParsePKCS8PrivateKey(key)
+			if err != nil {
+				if strings.Contains(err.Error(), "unknown elliptic curve") {
+					var edErr error
+					parsedKey, edErr = ParsePKCS8Ed25519PrivateKey(key)
+					if edErr != nil {
+						return fmt.Errorf("error parsing asymmetric key:\n - assuming contents are an ed25519 private key: %s\n - original error: %v", edErr, err)
+					}
 
-				// Parsing as Ed25519-in-PKCS8-ECPrivateKey succeeded!
-			} else {
-				return fmt.Errorf("error parsing asymmetric key: %s", err)
+					// Parsing as Ed25519-in-PKCS8-ECPrivateKey succeeded!
+				} else {
+					return fmt.Errorf("error parsing asymmetric key: %s", err)
+				}
+			}
+		} else {
+			// NOTE: sure if this or PKCS1
+			parsedKey, err = x509.ParsePKIXPublicKey(key)
+			if err != nil {
+				return fmt.Errorf("error parsing public key: %s", err)
 			}
 		}
 
-		switch parsedPrivateKey.(type) {
+		switch parsedKey.(type) {
 		case *ecdsa.PrivateKey:
 			if p.Type != KeyType_ECDSA_P256 && p.Type != KeyType_ECDSA_P384 && p.Type != KeyType_ECDSA_P521 {
-				return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedPrivateKey)
+				return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedKey)
 			}
 
-			ecdsaKey := parsedPrivateKey.(*ecdsa.PrivateKey)
+			ecdsaKey := parsedKey.(*ecdsa.PrivateKey)
 			curve := elliptic.P256()
 			if p.Type == KeyType_ECDSA_P384 {
 				curve = elliptic.P384()
@@ -1416,16 +1440,16 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 			entry.FormattedPublicKey = string(pemBytes)
 		case ed25519.PrivateKey:
 			if p.Type != KeyType_ED25519 {
-				return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedPrivateKey)
+				return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedKey)
 			}
-			privateKey := parsedPrivateKey.(ed25519.PrivateKey)
+			privateKey := parsedKey.(ed25519.PrivateKey)
 
 			entry.Key = privateKey
 			publicKey := privateKey.Public().(ed25519.PublicKey)
 			entry.FormattedPublicKey = base64.StdEncoding.EncodeToString(publicKey)
 		case *rsa.PrivateKey:
 			if p.Type != KeyType_RSA2048 && p.Type != KeyType_RSA3072 && p.Type != KeyType_RSA4096 {
-				return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedPrivateKey)
+				return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedKey)
 			}
 
 			keyBytes := 256
@@ -1434,14 +1458,19 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 			} else if p.Type == KeyType_RSA4096 {
 				keyBytes = 512
 			}
-			rsaKey := parsedPrivateKey.(*rsa.PrivateKey)
+			rsaKey := parsedKey.(*rsa.PrivateKey)
 			if rsaKey.Size() != keyBytes {
 				return fmt.Errorf("invalid key size: expected %d bytes, got %d bytes", keyBytes, rsaKey.Size())
 			}
 
 			entry.RSAKey = rsaKey
+		case *rsa.PublicKey:
+			// NOTE: Doesn't matter if we have keyType here
+			rsaPublicKey := parsedKey.(*rsa.PublicKey)
+			entry.RSAPublicKey = rsaPublicKey
+
 		default:
-			return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedPrivateKey)
+			return fmt.Errorf("invalid key type: expected %s, got %T", p.Type, parsedKey)
 		}
 	}
 
@@ -1950,13 +1979,19 @@ func (p *Policy) EncryptWithFactory(ver int, context []byte, nonce []byte, value
 		if err != nil {
 			return "", err
 		}
+		// NOTE: Not expecting KeyType if we only import public_key
 	case KeyType_RSA2048, KeyType_RSA3072, KeyType_RSA4096:
 		keyEntry, err := p.safeGetKeyEntry(ver)
 		if err != nil {
 			return "", err
 		}
-		key := keyEntry.RSAKey
-		ciphertext, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, &key.PublicKey, plaintext, nil)
+		var publicKey *rsa.PublicKey
+		if keyEntry.RSAPublicKey.Size() > 0 {
+			publicKey = keyEntry.RSAPublicKey
+		} else {
+			publicKey = &keyEntry.RSAKey.PublicKey
+		}
+		ciphertext, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, publicKey, plaintext, nil)
 		if err != nil {
 			return "", errutil.InternalError{Err: fmt.Sprintf("failed to RSA encrypt the plaintext: %v", err)}
 		}
