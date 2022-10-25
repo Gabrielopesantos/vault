@@ -398,8 +398,8 @@ func TestTransit_Import(t *testing.T) {
 			}
 
 			// Get key
-			rsaPrivateKey := getKey(t, keyType)
-			publicKey := rsaPrivateKey.(*rsa.PrivateKey).PublicKey
+			privateKey := getKey(t, keyType)
+			publicKey := privateKey.(*rsa.PrivateKey).PublicKey
 			publicKeyString, err := getPublicKeyString(&publicKey)
 			if err != nil {
 				t.Fatalf("failed to marshal public key: %s", err)
@@ -420,9 +420,14 @@ func TestTransit_Import(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to import public key: %s", err)
 			}
-
 		},
 	)
+	/*
+		Others test cases that might be worth considering or is it too much?
+		- Fails to import key if both key fields (ciphertext and public_key) are set
+		- Fails to import public_key if type isn't in SupportsPublicKeyImport
+		- Fails to import public_key because public key string couldn't be parsed
+	*/
 }
 
 func TestTransit_ImportVersion(t *testing.T) {

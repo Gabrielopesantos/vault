@@ -2,7 +2,11 @@ package transit
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
+	"fmt"
+	"github.com/hashicorp/go-uuid"
 	"reflect"
 	"strings"
 	"testing"
@@ -660,6 +664,61 @@ func TestTransit_BatchEncryptionCase13(t *testing.T) {
 	batchReq := &logical.Request{
 		Operation: logical.CreateOperation,
 		Path:      "encrypt/my-key",
+		Storage:   s,
+		Data:      batchData,
+	}
+	_, err = b.HandleRequest(context.Background(), batchReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Case14: Successful encryption with an RSA Public key
+func TestTransit_BatchEncryptionCase14(t *testing.T) {
+	b, s := createBackendWithStorage(t)
+	keyBits := 2048
+	keyType := "rsa-2048"
+	keyID, err := uuid.GenerateUUID()
+	if err != nil {
+		t.Fatalf("failed to generate key ID: %s", err)
+	}
+
+	// Get key
+	privateKey, err := rsa.GenerateKey(rand.Reader, keyBits)
+	if err != nil {
+		t.Fatalf("failed to generate rsa private key: %s", err)
+	}
+	publicKeyString, err := getPublicKeyString(&privateKey.PublicKey)
+	if err != nil {
+		t.Fatalf("failed to marshal public key: %s", err)
+	}
+
+	// Import key
+	req := &logical.Request{
+		Storage:   s,
+		Operation: logical.UpdateOperation,
+		Path:      fmt.Sprintf("keys/%s/import", keyID),
+		Data: map[string]interface{}{
+			"allow_rotation": false,
+			"type":           keyType,
+			"public_key":     publicKeyString,
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to import public key: %s", err)
+	}
+
+	batchInput := []interface{}{
+		map[string]interface{}{"plaintext": "bXkgc2VjcmV0IGRhdGE=", "nonce": "YmFkbm9uY2U="},
+	}
+
+	batchData := map[string]interface{}{
+		"batch_input": batchInput,
+	}
+	batchReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      fmt.Sprintf("encrypt/%s", keyID),
 		Storage:   s,
 		Data:      batchData,
 	}
