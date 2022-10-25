@@ -147,7 +147,6 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 	ciphertextString := d.Get("ciphertext").(string)
 	allowRotation := d.Get("allow_rotation").(bool)
 	publicKeyString := d.Get("public_key").(string)
-	var isPublicKey bool
 
 	// Ensure the caller didn't supply "convergent_encryption" as a field, since it's not supported on import.
 	if _, ok := d.Raw["convergent_encryption"]; ok {
@@ -162,11 +161,12 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 	   NOTE: Check if only ciphertextString or publicKeyString were provided
 	   Works but not be the best way to validate this
 	*/
+	var publicKeySet bool // Name?
 	if ciphertextString != "" && publicKeyString != "" {
 		// NOTE: Address error message
 		return nil, errors.New("cannot import ciphertext and public_key in the same request")
 	} else if ciphertextString == "" {
-		isPublicKey = true
+		publicKeySet = true
 	}
 
 	polReq := keysutil.PolicyRequest{
@@ -208,15 +208,10 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		return logical.ErrorResponse(fmt.Sprintf("unknown key type: %v", keyType)), logical.ErrInvalidRequest
 	}
 
-	if !polReq.KeyType.SupportsImportPublicKey() {
-		// NOTE: Review error desc
-		return nil, errors.New("provided type does not support public_key import")
-	}
-
 	// NOTE: None of this is needed if we are importing a public key
 	// Maybe all of this could go into its own function (decryptCiphertext)
 	var key []byte
-	if !isPublicKey {
+	if !publicKeySet {
 		hashFn, err := parseHashFn(hashFnStr)
 		if err != nil {
 			return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
@@ -232,9 +227,13 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 			return nil, err
 		}
 	} else {
+		if publicKeySet && !polReq.KeyType.SupportsImportPublicKey() {
+			// NOTE: Review error desc
+			return nil, errors.New("provided type does not support public_key import")
+		}
 		key = []byte(publicKeyString)
 	}
-	// None of this is needed if we are importing a public key
+	// NOTE: None of this is needed if we are importing a public key
 
 	p, _, err := b.GetPolicy(ctx, polReq, b.GetRandomReader())
 	if err != nil {
@@ -248,7 +247,7 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		return nil, errors.New("the import path cannot be used with an existing key; use import-version to rotate an existing imported key")
 	}
 
-	err = b.lm.ImportPolicy(ctx, polReq, key, isPublicKey, b.GetRandomReader())
+	err = b.lm.ImportPolicy(ctx, polReq, key, publicKeySet, b.GetRandomReader())
 	if err != nil {
 		return nil, err
 	}

@@ -388,6 +388,41 @@ func TestTransit_Import(t *testing.T) {
 			}
 		},
 	)
+	t.Run(
+		"successfully imports rsa public key",
+		func(t *testing.T) {
+			keyType := "rsa-2048"
+			keyID, err := uuid.GenerateUUID()
+			if err != nil {
+				t.Fatalf("failed to generate key ID: %s", err)
+			}
+
+			// Get key
+			rsaPrivateKey := getKey(t, keyType)
+			publicKey := rsaPrivateKey.(*rsa.PrivateKey).PublicKey
+			publicKeyString, err := getPublicKeyString(&publicKey)
+			if err != nil {
+				t.Fatalf("failed to marshal public key: %s", err)
+			}
+
+			// Import key
+			req := &logical.Request{
+				Storage:   s,
+				Operation: logical.UpdateOperation,
+				Path:      fmt.Sprintf("keys/%s/import", keyID),
+				Data: map[string]interface{}{
+					"allow_rotation": false,
+					"type":           keyType,
+					"public_key":     publicKeyString,
+				},
+			}
+			_, err = b.HandleRequest(context.Background(), req)
+			if err != nil {
+				t.Fatalf("failed to import public key: %s", err)
+			}
+
+		},
+	)
 }
 
 func TestTransit_ImportVersion(t *testing.T) {
@@ -623,4 +658,14 @@ func generateKey(keyType string) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("failed to generate unsupported key type: %s", keyType)
 	}
+}
+
+// getPublicKeyString: Add description (any or *rsa.PublicKey)
+func getPublicKeyString(publicKey *rsa.PublicKey) (string, error) {
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		return "", err
+	}
+
+	return string(publicKeyBytes), nil
 }
