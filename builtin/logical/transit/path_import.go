@@ -122,11 +122,16 @@ with the wrapping key and then concatenated with the import key, wrapped by the 
 				Description: `The hash function used as a random oracle in the OAEP wrapping of the user-generated,
 ephemeral AES key. Can be one of "SHA1", "SHA224", "SHA256" (default), "SHA384", or "SHA512"`,
 			},
-			//"public_key": {
-			//Type: framework.TypeString,
-			//// NOTE: Description (import_version)
-			//Description: `Public key to be imported`,
-			//},
+			"public_key": {
+				Type: framework.TypeString,
+				// NOTE: Description (import)
+				Description: `Public key to be imported`,
+			},
+			"bump_version": {
+				Type: framework.TypeBool,
+				// NOTE: Description
+				Description: `Bump version or not`,
+			},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
 			logical.UpdateOperation: b.pathImportVersionWrite,
@@ -157,16 +162,9 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		return nil, errors.New("allow_rotation must be set to true if auto-rotation is enabled")
 	}
 
-	/*
-	   NOTE: Check if only ciphertextString or publicKeyString were provided
-	   Works but not be the best way to validate this
-	*/
-	var publicKeySet bool // Name?
-	if ciphertextString != "" && publicKeyString != "" {
-		// NOTE: Address error message
-		return nil, errors.New("cannot import ciphertext and public_key in the same request")
-	} else if ciphertextString == "" {
-		publicKeySet = true
+	publicKeySet, err := isPublicKeySet(d)
+	if err != nil {
+		return nil, err
 	}
 
 	polReq := keysutil.PolicyRequest{
@@ -259,6 +257,8 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 	name := d.Get("name").(string)
 	hashFnStr := d.Get("hash_function").(string)
 	ciphertextString := d.Get("ciphertext").(string)
+	publicKeyString := d.Get("public_key").(string)
+	//bumpVersion = d.Get("bump_version").(string) // NOTE: Let's leave this for later
 
 	polReq := keysutil.PolicyRequest{
 		Storage: req.Storage,
@@ -266,9 +266,9 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 		Upsert:  false,
 	}
 
-	hashFn, err := parseHashFn(hashFnStr)
+	publicKeySet, err := isPublicKeySet(d)
 	if err != nil {
-		return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
+		return nil, err
 	}
 
 	p, _, err := b.GetPolicy(ctx, polReq, b.GetRandomReader())
@@ -285,21 +285,49 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 		return nil, errors.New("import_version cannot be used on keys with convergent encryption enabled")
 	}
 
+	/*
+		Cases:
+		-> Public key has been imported and public key is being updated
+			-> Can we know if the key type is the same?
+			-> Updates of a key part should be bumps?
+		-> Public key has been imported and private key is being added
+			-> Check if they are "Valid"
+			-> If it is, import
+		-> Private key has been imported and private key is being updated
+			-> Allow
+		-> Private key has been imported and public key is being added
+			-> Not necessary (Should we allow this?)
+	*/
+
+	var importKey []byte
+	if !publicKeySet {
+		hashFn, err := parseHashFn(hashFnStr)
+		if err != nil {
+			return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
+		}
+
+		ciphertext, err := base64.StdEncoding.DecodeString(ciphertextString)
+		if err != nil {
+			return nil, err
+		}
+		importKey, err = b.decryptImportedKey(ctx, req.Storage, ciphertext, hashFn)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		importKey = []byte(publicKeyString)
+	}
+
 	if !b.System().CachingDisabled() {
 		p.Lock(true)
 	}
 	defer p.Unlock()
 
-	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextString)
-	if err != nil {
-		return nil, err
-	}
-	importKey, err := b.decryptImportedKey(ctx, req.Storage, ciphertext, hashFn)
-	if err != nil {
-		return nil, err
-	}
-	// NOTE: Hardcoded for now
-	err = p.Import(ctx, req.Storage, importKey, false, b.GetRandomReader())
+	// NOTE: Check here if keys match (but we don't have the rsa.PublicKey obj)  and do we need the keyType
+	// Why is type not required here, key type cannot change?
+	// We need to check somewhere what do we already have and what is being provided
+	// Where is the keyVersion being bumped?
+	err = p.Import(ctx, req.Storage, importKey, publicKeySet, b.GetRandomReader())
 	if err != nil {
 		return nil, err
 	}
@@ -372,6 +400,29 @@ func parseHashFn(hashFn string) (hash.Hash, error) {
 	default:
 		return nil, fmt.Errorf("unknown hash function: %s", hashFn)
 	}
+}
+
+/*
+   NOTE: Check if only ciphertextString or publicKeyString were provided
+   Works but not be the best way to validate this
+*/
+// NOTE: Review names and error messages
+func isPublicKeySet(fieldData *framework.FieldData) (bool, error) {
+	var isPublicKey bool
+	var err error
+	_, ciphertextSet := fieldData.Raw["ciphertext"]
+	_, publicKeySet := fieldData.Raw["public_key"]
+	if ciphertextSet && publicKeySet {
+		err = errors.New("cannot import ciphertext and public_key in the same request")
+	} else if ciphertextSet {
+		isPublicKey = false
+	} else if publicKeySet {
+		isPublicKey = true
+	} else {
+		err = errors.New("one of the following fields, ciphertext xor public_key, has to be set")
+	}
+
+	return isPublicKey, err
 }
 
 const (
