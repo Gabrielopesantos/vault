@@ -6,7 +6,9 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"hash"
@@ -177,8 +179,6 @@ func (b *backend) pathImportWrite(ctx context.Context, req *logical.Request, d *
 		AllowImportedKeyRotation: allowRotation,
 	}
 
-	// keyType is still required when importing a public_key
-	// Should we check if the public key is only for the supported types (RSA)?
 	switch strings.ToLower(keyType) {
 	case "aes128-gcm96":
 		polReq.KeyType = keysutil.KeyType_AES128_GCM96
@@ -288,6 +288,10 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 	/*
 		Cases:
 		-> Public key has been imported and public key is being updated
+			-> Private key has already been imported;
+				-> public key cannot be updated
+			-> Private key has not been imported so far;
+				-> Public key can be updated
 			-> Can we know if the key type is the same?
 			-> Updates of a key part should be bumps?
 		-> Public key has been imported and private key is being added
@@ -310,11 +314,35 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 		if err != nil {
 			return nil, err
 		}
+
 		importKey, err = b.decryptImportedKey(ctx, req.Storage, ciphertext, hashFn)
 		if err != nil {
 			return nil, err
 		}
+		// Let's keep this here for now
+		if p.PublicKeyImported {
+			// How would we get the public key here if we are importing a private key
+			rsaPublicKey, err := p.GetRSAPublicKey(p.LatestVersion)
+			if err != nil {
+				// NOTE: Address err
+				return nil, err
+			}
+			isKeyPair, err := verifyRSAKeyPair(string(importKey), rsaPublicKey)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing asymmetric key: %v", err)
+			}
+			if !isKeyPair {
+				return nil, errors.New("failed to import, private key provided is not the counterpart of the public key")
+			}
+		}
 	} else {
+		// If policy exists and a public key has not been imported, it means that only
+		// a private key was imported/updated so far so there's no need to import its
+		// public counterpart
+		if !p.PublicKeyImported {
+			return nil, errors.New("public key cannot be imported if its private counter part has already been")
+		}
+
 		importKey = []byte(publicKeyString)
 	}
 
@@ -323,10 +351,7 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 	}
 	defer p.Unlock()
 
-	// NOTE: Check here if keys match (but we don't have the rsa.PublicKey obj)  and do we need the keyType
 	// Why is type not required here, key type cannot change?
-	// We need to check somewhere what do we already have and what is being provided
-	// Where is the keyVersion being bumped?
 	err = p.Import(ctx, req.Storage, importKey, publicKeySet, b.GetRandomReader())
 	if err != nil {
 		return nil, err
@@ -423,6 +448,17 @@ func isPublicKeySet(fieldData *framework.FieldData) (bool, error) {
 	}
 
 	return isPublicKey, err
+}
+
+// NOTE: Not sure if this func doesn't already exist somewhere
+func verifyRSAKeyPair(privateKey string, publicKey *rsa.PublicKey) (bool, error) {
+	block, _ := pem.Decode([]byte(privateKey))
+	rsaPrivateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return false, err
+	}
+
+	return rsaPrivateKey.(*rsa.PrivateKey).PublicKey.Equal(publicKey), nil
 }
 
 const (

@@ -432,6 +432,9 @@ type Policy struct {
 	AllowImportedKeyRotation bool
 
 	ManagedKeyName string `json:"managed_key_name,omitempty"`
+
+	// PublicKeyImported indicates if a public key has already been imported
+	PublicKeyImported bool `json:"public_key_imported"`
 }
 
 func (p *Policy) Lock(exclusive bool) {
@@ -1491,6 +1494,12 @@ func (p *Policy) Import(ctx context.Context, storage logical.Storage, key []byte
 		p.MinDecryptionVersion = 1
 	}
 
+	// This check will allow verifying if in the current policy a public key has
+	// already been inserted;
+	if isPublicKey {
+		p.PublicKeyImported = true
+	}
+
 	return p.Persist(ctx, storage)
 }
 
@@ -1979,14 +1988,14 @@ func (p *Policy) EncryptWithFactory(ver int, context []byte, nonce []byte, value
 		if err != nil {
 			return "", err
 		}
-		// NOTE: Not expecting KeyType if we only import public_key
 	case KeyType_RSA2048, KeyType_RSA3072, KeyType_RSA4096:
 		keyEntry, err := p.safeGetKeyEntry(ver)
 		if err != nil {
 			return "", err
 		}
 		var publicKey *rsa.PublicKey
-		if keyEntry.RSAPublicKey.Size() > 0 {
+		// NOTE: Is this a valid check?
+		if keyEntry.RSAPublicKey != nil {
 			publicKey = keyEntry.RSAPublicKey
 		} else {
 			publicKey = &keyEntry.RSAKey.PublicKey
@@ -2007,4 +2016,14 @@ func (p *Policy) EncryptWithFactory(ver int, context []byte, nonce []byte, value
 	encoded = p.getVersionPrefix(ver) + encoded
 
 	return encoded, nil
+}
+
+func (p *Policy) GetRSAPublicKey(ver int) (*rsa.PublicKey, error) {
+	keyEntry, err := p.safeGetKeyEntry(ver)
+	// NOTE: Address what is returned
+	if err != nil {
+		return nil, err
+	}
+
+	return keyEntry.RSAPublicKey, nil
 }
