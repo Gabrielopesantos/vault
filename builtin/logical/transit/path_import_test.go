@@ -574,6 +574,52 @@ func TestTransit_ImportVersion(t *testing.T) {
 			}
 		},
 	)
+	t.Run(
+		"import public key after private key has been inserted",
+		func(t *testing.T) {
+			keyType := "rsa-2048"
+			keyID, err := uuid.GenerateUUID()
+			if err != nil {
+				t.Fatalf("failed to generate key ID: %s", err)
+			}
+
+			privateKey := getKey(t, keyType)
+
+			// Import private key
+			importBlob := wrapTargetKeyForImport(t, pubWrappingKey, privateKey, keyType, "SHA256")
+			req := &logical.Request{
+				Storage:   s,
+				Operation: logical.UpdateOperation,
+				Path:      fmt.Sprintf("keys/%s/import", keyID),
+				Data: map[string]interface{}{
+					"ciphertext": importBlob,
+					"type":       keyType,
+				},
+			}
+			_, err = b.HandleRequest(context.Background(), req)
+			if err != nil {
+				t.Fatalf("failed to import key: %s", err)
+			}
+
+			publicKeyString, err := x509.MarshalPKIXPublicKey(&privateKey.(*rsa.PrivateKey).PublicKey)
+			if err != nil {
+				t.Fatalf("failed to marshal public key: %s", err)
+			}
+
+			// Import public key
+			req = &logical.Request{
+				Storage:   s,
+				Operation: logical.UpdateOperation,
+				Path:      fmt.Sprintf("keys/%s/import_version", keyID),
+				Data: map[string]interface{}{
+					"public_key": publicKeyString,
+				},
+			}
+			_, err = b.HandleRequest(context.Background(), req)
+			if err == nil {
+				t.Fatalf("should have failed to import public key: %s", err)
+			}
+		})
 }
 
 func wrapTargetKeyForImport(t *testing.T, wrappingKey *rsa.PublicKey, targetKey interface{}, targetKeyType string, hashFnName string) string {

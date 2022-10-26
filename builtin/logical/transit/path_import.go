@@ -321,7 +321,6 @@ func (b *backend) pathImportVersionWrite(ctx context.Context, req *logical.Reque
 		}
 		// Let's keep this here for now
 		if p.PublicKeyImported {
-			// How would we get the public key here if we are importing a private key
 			rsaPublicKey, err := p.GetRSAPublicKey(p.LatestVersion)
 			if err != nil {
 				// NOTE: Address err
