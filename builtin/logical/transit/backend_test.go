@@ -2067,7 +2067,11 @@ func testTransit_ReadPublicKeyImported(t *testing.T, keyType string) {
 
 func TestTransit_SignWithImportedPublicKey(t *testing.T) {
 	testTransit_SignWithImportedPublicKey(t, "rsa-2048")
+	testTransit_SignWithImportedPublicKey(t, "rsa-3072")
+	testTransit_SignWithImportedPublicKey(t, "rsa-4096")
 	testTransit_SignWithImportedPublicKey(t, "ecdsa-p256")
+	testTransit_SignWithImportedPublicKey(t, "ecdsa-p384")
+	testTransit_SignWithImportedPublicKey(t, "ecdsa-p521")
 	testTransit_SignWithImportedPublicKey(t, "ed25519")
 }
 

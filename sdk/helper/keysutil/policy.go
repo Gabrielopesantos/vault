@@ -156,7 +156,7 @@ func (kt KeyType) HashSignatureInput() bool {
 
 func (kt KeyType) DerivationSupported() bool {
 	switch kt {
-	case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305, KeyType_ED25519:
+	case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305, KeyType_ED25519, KeyType_ECDSA_P256, KeyType_ECDSA_P384, KeyType_ECDSA_P521:
 		return true
 	}
 	return false
@@ -216,7 +216,7 @@ type KeyData struct {
 
 // KeyEntry stores the key and metadata
 type KeyEntry struct {
-	// AES or some other kind that is a pure byte slice like ED25519
+	// AES or some other kind that is a pure byte slice like ED25519, ECDSA
 	Key []byte `json:"key"`
 
 	// Key used for HMAC functions
@@ -783,6 +783,7 @@ func (p *Policy) Upgrade(ctx context.Context, storage logical.Storage, randReade
 	return nil
 }
 
+// NOTE: GetKey has derivation
 // GetKey is used to derive the encryption key that should be used depending
 // on the policy. If derivation is disabled the raw key is used and no context
 // is required, otherwise the KDF mode is used with the context to derive the
@@ -861,6 +862,30 @@ func (p *Policy) DeriveKey(context, salt []byte, ver int, numBytes int) ([]byte,
 				return nil, errutil.InternalError{Err: fmt.Sprintf("error generating derived key: %v", err)}
 			}
 			return pri, nil
+
+		case KeyType_ECDSA_P256, KeyType_ECDSA_P384, KeyType_ECDSA_P521:
+			// NOTE: This is repeated a lot
+			var curve elliptic.Curve
+			switch p.Type {
+			case KeyType_ECDSA_P384:
+				curve = elliptic.P384()
+			case KeyType_ECDSA_P521:
+				curve = elliptic.P521()
+			default:
+				curve = elliptic.P256()
+			}
+
+			pri, err := ecdsa.GenerateKey(curve, limReader)
+			if err != nil {
+				return nil, errutil.InternalError{Err: fmt.Sprintf("error generating derived key: %v", err)}
+			}
+
+			derBytes, err := x509.MarshalPKCS8PrivateKey(pri)
+			if err != nil {
+				return nil, errutil.InternalError{Err: fmt.Sprintf("error marshalling generated private key: %v", err)}
+			}
+
+			return derBytes, nil
 
 		default:
 			return nil, errutil.InternalError{Err: "unsupported key type for derivation"}
@@ -1092,6 +1117,7 @@ func (p *Policy) validRSAPSSSaltLength(keyBitLen int, hash crypto.Hash, saltLeng
 	return p.minRSAPSSSaltLength() <= saltLength && saltLength <= p.maxRSAPSSSaltLength(keyBitLen, hash)
 }
 
+// Signing has derivation, as expected
 func (p *Policy) SignWithOptions(ver int, context, input []byte, options *SigningOptions) (*SigningResult, error) {
 	if !p.Type.SigningSupported() {
 		return nil, fmt.Errorf("message signing not supported for key type %v", p.Type)
@@ -1128,6 +1154,7 @@ func (p *Policy) SignWithOptions(ver int, context, input []byte, options *Signin
 
 	switch p.Type {
 	case KeyType_ECDSA_P256, KeyType_ECDSA_P384, KeyType_ECDSA_P521:
+		var key *ecdsa.PrivateKey
 		var curveBits int
 		var curve elliptic.Curve
 		switch p.Type {
@@ -1142,13 +1169,31 @@ func (p *Policy) SignWithOptions(ver int, context, input []byte, options *Signin
 			curve = elliptic.P256()
 		}
 
-		key := &ecdsa.PrivateKey{
-			PublicKey: ecdsa.PublicKey{
-				Curve: curve,
-				X:     keyParams.EC_X,
-				Y:     keyParams.EC_Y,
-			},
-			D: keyParams.EC_D,
+		if p.Derived {
+			derBytes, err := p.GetKey(context, ver, curveBits)
+			if err != nil {
+				return nil, err
+			}
+
+			privKey, err := x509.ParsePKCS8PrivateKey(derBytes)
+			if err != nil {
+				return nil, err
+			}
+
+			var ok bool
+			key, ok = privKey.(*ecdsa.PrivateKey)
+			if !ok {
+				return nil, errors.New("could not cast parsed key as an ECDSA key")
+			}
+		} else {
+			key = &ecdsa.PrivateKey{
+				PublicKey: ecdsa.PublicKey{
+					Curve: curve,
+					X:     keyParams.EC_X,
+					Y:     keyParams.EC_Y,
+				},
+				D: keyParams.EC_D,
+			}
 		}
 
 		r, s, err := ecdsa.Sign(rand.Reader, key, input)
@@ -1283,6 +1328,7 @@ func (p *Policy) VerifySignature(context, input []byte, hashAlgorithm HashType, 
 	})
 }
 
+// Verification has Derivation
 func (p *Policy) VerifySignatureWithOptions(context, input []byte, sig string, options *SigningOptions) (bool, error) {
 	if !p.Type.SigningSupported() {
 		return false, errutil.UserError{Err: fmt.Sprintf("message verification not supported for key type %v", p.Type)}
@@ -1336,13 +1382,19 @@ func (p *Policy) VerifySignatureWithOptions(context, input []byte, sig string, o
 
 	switch p.Type {
 	case KeyType_ECDSA_P256, KeyType_ECDSA_P384, KeyType_ECDSA_P521:
+		var pub *ecdsa.PublicKey
+
+		var curveBits int
 		var curve elliptic.Curve
 		switch p.Type {
 		case KeyType_ECDSA_P384:
+			curveBits = 384
 			curve = elliptic.P384()
 		case KeyType_ECDSA_P521:
+			curveBits = 521
 			curve = elliptic.P521()
 		default:
+			curveBits = 256
 			curve = elliptic.P256()
 		}
 
@@ -1368,17 +1420,32 @@ func (p *Policy) VerifySignatureWithOptions(context, input []byte, sig string, o
 			ecdsaSig.S.SetBytes(sb)
 		}
 
-		keyParams, err := p.safeGetKeyEntry(ver)
-		if err != nil {
-			return false, err
-		}
-		key := &ecdsa.PublicKey{
-			Curve: curve,
-			X:     keyParams.EC_X,
-			Y:     keyParams.EC_Y,
+		if p.Derived {
+			derBytes, err := p.GetKey(context, ver, curveBits)
+			if err != nil {
+				return false, err
+			}
+
+			privKey, err := x509.ParsePKCS8PrivateKey(derBytes)
+			if err != nil {
+				return false, err
+			}
+
+			pub = &privKey.(*ecdsa.PrivateKey).PublicKey
+		} else {
+			keyParams, err := p.safeGetKeyEntry(ver)
+			if err != nil {
+				return false, err
+			}
+
+			pub = &ecdsa.PublicKey{
+				Curve: curve,
+				X:     keyParams.EC_X,
+				Y:     keyParams.EC_Y,
+			}
 		}
 
-		return ecdsa.Verify(key, input, ecdsaSig.R, ecdsaSig.S), nil
+		return ecdsa.Verify(pub, input, ecdsaSig.R, ecdsaSig.S), nil
 
 	case KeyType_ED25519:
 		var pub ed25519.PublicKey
@@ -1487,6 +1554,7 @@ func (p *Policy) ImportPublicOrPrivate(ctx context.Context, storage logical.Stor
 		entry.HMACKey = hmacKey
 	}
 
+	// Derived?
 	if p.Type == KeyType_ED25519 && p.Derived && !isPrivateKey {
 		return fmt.Errorf("unable to import only public key for derived Ed25519 key: imported key should not be an Ed25519 key pair but is instead an HKDF key")
 	}
@@ -1656,6 +1724,9 @@ func (p *Policy) RotateInMemory(randReader io.Reader) (retErr error) {
 		if err != nil {
 			return errwrap.Wrapf("error marshaling public key: {{err}}", err)
 		}
+
+		entry.Key = derBytes
+
 		pemBlock := &pem.Block{
 			Type:  "PUBLIC KEY",
 			Bytes: derBytes,
@@ -2224,7 +2295,6 @@ func (ke *KeyEntry) parseFromKey(PolKeyType KeyType, parsedKey any) error {
 		var err error
 		ecdsaKey, ok := parsedKey.(*ecdsa.PrivateKey)
 		if ok {
-
 			if ecdsaKey.Curve != curve {
 				return fmt.Errorf("invalid curve: expected %s, got %s", curve.Params().Name, ecdsaKey.Curve.Params().Name)
 			}
@@ -2237,6 +2307,22 @@ func (ke *KeyEntry) parseFromKey(PolKeyType KeyType, parsedKey any) error {
 			if err != nil {
 				return errwrap.Wrapf("error marshaling public key: {{err}}", err)
 			}
+
+			privKey := &ecdsa.PrivateKey{
+				PublicKey: ecdsa.PublicKey{
+					Curve: curve,
+					X:     ke.EC_X,
+					Y:     ke.EC_Y,
+				},
+				D: ke.EC_D,
+			}
+
+			privDerBytes, err := x509.MarshalPKCS8PrivateKey(privKey)
+			if err != nil {
+				return fmt.Errorf("failed to marshall imported key: %w", err)
+			}
+
+			ke.Key = privDerBytes
 		} else {
 			ecdsaKey := parsedKey.(*ecdsa.PublicKey)
 

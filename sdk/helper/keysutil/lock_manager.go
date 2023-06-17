@@ -369,9 +369,9 @@ func (lm *LockManager) GetPolicy(ctx context.Context, req PolicyRequest, rand io
 			}
 
 		case KeyType_ECDSA_P256, KeyType_ECDSA_P384, KeyType_ECDSA_P521:
-			if req.Derived || req.Convergent {
+			if req.Convergent {
 				cleanup()
-				return nil, false, fmt.Errorf("key derivation and convergent encryption not supported for keys of type %v", req.KeyType)
+				return nil, false, fmt.Errorf("convergent encryption not supported for keys of type %v", req.KeyType)
 			}
 
 		case KeyType_ED25519:
@@ -414,6 +414,7 @@ func (lm *LockManager) GetPolicy(ctx context.Context, req PolicyRequest, rand io
 		}
 
 		if req.Derived {
+			// NOTE: KDF from crypto/kdf
 			p.KDF = Kdf_hkdf_sha256
 			if req.Convergent {
 				p.ConvergentEncryption = true
@@ -426,7 +427,7 @@ func (lm *LockManager) GetPolicy(ctx context.Context, req PolicyRequest, rand io
 			}
 		}
 
-		// Performs the actual persist and does setup
+		// Performs the actual persist and does setup <-
 		if p.Type == KeyType_MANAGED_KEY {
 			err = p.RotateManagedKey(ctx, req.Storage, req.ManagedKeyUUID)
 		} else {
