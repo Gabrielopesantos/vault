@@ -864,7 +864,6 @@ func (p *Policy) DeriveKey(context, salt []byte, ver int, numBytes int) ([]byte,
 			return pri, nil
 
 		case KeyType_ECDSA_P256, KeyType_ECDSA_P384, KeyType_ECDSA_P521:
-			// NOTE: This is repeated a lot
 			var curve elliptic.Curve
 			switch p.Type {
 			case KeyType_ECDSA_P384:
@@ -875,18 +874,30 @@ func (p *Policy) DeriveKey(context, salt []byte, ver int, numBytes int) ([]byte,
 				curve = elliptic.P256()
 			}
 
-			pri, err := ecdsa.GenerateKey(curve, limReader)
+			params := curve.Params()
+			b := make([]byte, params.N.BitLen()/8+8)
+			_, err := io.ReadFull(limReader, b)
 			if err != nil {
-				return nil, errutil.InternalError{Err: fmt.Sprintf("error generating derived key: %v", err)}
+				return nil, err // FIXME: Add useful information to error
 			}
+
+			one := big.NewInt(1)
+			k := new(big.Int).SetBytes(b)
+			n := new(big.Int).Sub(params.N, one)
+			k.Mod(k, n)
+			k.Add(k, one)
+
+			pri := new(ecdsa.PrivateKey)
+			pri.PublicKey.Curve = curve
+			pri.D = k
+			pri.PublicKey.X, pri.PublicKey.Y = curve.ScalarBaseMult(k.Bytes())
 
 			derBytes, err := x509.MarshalPKCS8PrivateKey(pri)
 			if err != nil {
-				return nil, errutil.InternalError{Err: fmt.Sprintf("error marshalling generated private key: %v", err)}
+				return nil, fmt.Errorf("could not parse generated private key: %w", err)
 			}
 
 			return derBytes, nil
-
 		default:
 			return nil, errutil.InternalError{Err: "unsupported key type for derivation"}
 		}
@@ -1170,7 +1181,7 @@ func (p *Policy) SignWithOptions(ver int, context, input []byte, options *Signin
 		}
 
 		if p.Derived {
-			derBytes, err := p.GetKey(context, ver, curveBits)
+			derBytes, err := p.GetKey(context, ver, curveBits/8+8)
 			if err != nil {
 				return nil, err
 			}
@@ -1421,7 +1432,7 @@ func (p *Policy) VerifySignatureWithOptions(context, input []byte, sig string, o
 		}
 
 		if p.Derived {
-			derBytes, err := p.GetKey(context, ver, curveBits)
+			derBytes, err := p.GetKey(context, ver, curveBits/8+8)
 			if err != nil {
 				return false, err
 			}
