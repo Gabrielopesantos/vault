@@ -414,7 +414,6 @@ func (lm *LockManager) GetPolicy(ctx context.Context, req PolicyRequest, rand io
 		}
 
 		if req.Derived {
-			// NOTE: KDF from crypto/kdf
 			p.KDF = Kdf_hkdf_sha256
 			if req.Convergent {
 				p.ConvergentEncryption = true
@@ -427,7 +426,7 @@ func (lm *LockManager) GetPolicy(ctx context.Context, req PolicyRequest, rand io
 			}
 		}
 
-		// Performs the actual persist and does setup <-
+		// Performs the actual persist and does setup
 		if p.Type == KeyType_MANAGED_KEY {
 			err = p.RotateManagedKey(ctx, req.Storage, req.ManagedKeyUUID)
 		} else {

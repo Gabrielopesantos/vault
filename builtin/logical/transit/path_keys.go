@@ -65,7 +65,6 @@ The type of key to create. Currently, "aes128-gcm96" (symmetric), "aes256-gcm96"
 `,
 			},
 
-			// NOTE: Are these transactions only encryptions or also signing? Etc?
 			"derived": {
 				Type: framework.TypeBool,
 				Description: `Enables key derivation mode. This

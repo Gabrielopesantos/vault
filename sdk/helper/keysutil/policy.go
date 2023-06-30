@@ -783,7 +783,6 @@ func (p *Policy) Upgrade(ctx context.Context, storage logical.Storage, randReade
 	return nil
 }
 
-// NOTE: GetKey has derivation
 // GetKey is used to derive the encryption key that should be used depending
 // on the policy. If derivation is disabled the raw key is used and no context
 // is required, otherwise the KDF mode is used with the context to derive the
@@ -1128,7 +1127,6 @@ func (p *Policy) validRSAPSSSaltLength(keyBitLen int, hash crypto.Hash, saltLeng
 	return p.minRSAPSSSaltLength() <= saltLength && saltLength <= p.maxRSAPSSSaltLength(keyBitLen, hash)
 }
 
-// Signing has derivation, as expected
 func (p *Policy) SignWithOptions(ver int, context, input []byte, options *SigningOptions) (*SigningResult, error) {
 	if !p.Type.SigningSupported() {
 		return nil, fmt.Errorf("message signing not supported for key type %v", p.Type)
@@ -1339,7 +1337,6 @@ func (p *Policy) VerifySignature(context, input []byte, hashAlgorithm HashType, 
 	})
 }
 
-// Verification has Derivation
 func (p *Policy) VerifySignatureWithOptions(context, input []byte, sig string, options *SigningOptions) (bool, error) {
 	if !p.Type.SigningSupported() {
 		return false, errutil.UserError{Err: fmt.Sprintf("message verification not supported for key type %v", p.Type)}
@@ -1565,7 +1562,7 @@ func (p *Policy) ImportPublicOrPrivate(ctx context.Context, storage logical.Stor
 		entry.HMACKey = hmacKey
 	}
 
-	// Derived?
+	// NOTE: This should also check ECDSA key types
 	if p.Type == KeyType_ED25519 && p.Derived && !isPrivateKey {
 		return fmt.Errorf("unable to import only public key for derived Ed25519 key: imported key should not be an Ed25519 key pair but is instead an HKDF key")
 	}
