@@ -41,6 +41,16 @@ func TestTransit_SignVerify_ECDSA(t *testing.T) {
 	t.Run("521", func(t *testing.T) {
 		testTransit_SignVerify_ECDSA(t, 521)
 	})
+	// NOTE: These functions are repeated what's being tested before
+	t.Run("256 with Derivation", func(t *testing.T) {
+		testTransit_SignVerify_Derived(t, keysutil.KeyType_ECDSA_P256)
+	})
+	t.Run("384 with Derivation", func(t *testing.T) {
+		testTransit_SignVerify_Derived(t, keysutil.KeyType_ECDSA_P384)
+	})
+	t.Run("521 with Derivation", func(t *testing.T) {
+		testTransit_SignVerify_Derived(t, keysutil.KeyType_ECDSA_P521)
+	})
 }
 
 func testTransit_SignVerify_ECDSA(t *testing.T, bits int) {
@@ -325,6 +335,10 @@ func testTransit_SignVerify_ECDSA(t *testing.T, bits int) {
 	verifyRequest(req, true, "", v1sig)
 }
 
+func TestTransit_SignVerify_ED25519(t *testing.T) {
+	testTransit_SignVerify_Derived(t, keysutil.KeyType_ED25519)
+}
+
 func validatePublicKey(t *testing.T, in string, sig string, pubKeyRaw []byte, expectValid bool, postpath string, b *backend) {
 	t.Helper()
 	input, _ := base64.StdEncoding.DecodeString(in)
@@ -370,7 +384,11 @@ func validatePublicKey(t *testing.T, in string, sig string, pubKeyRaw []byte, ex
 	}
 }
 
-func TestTransit_SignVerify_ED25519(t *testing.T) {
+func testTransit_SignVerify_Derived(t *testing.T, keyType keysutil.KeyType) {
+	if !keyType.DerivationSupported() {
+		t.Fatalf("provided key type does not support derivation")
+	}
+
 	b, storage := createBackendWithSysView(t)
 
 	// First create a key
@@ -379,7 +397,7 @@ func TestTransit_SignVerify_ED25519(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "keys/foo",
 		Data: map[string]interface{}{
-			"type": "ed25519",
+			"type": keyType.String(),
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), req)
@@ -393,7 +411,7 @@ func TestTransit_SignVerify_ED25519(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "keys/bar",
 		Data: map[string]interface{}{
-			"type":    "ed25519",
+			"type":    keyType.String(),
 			"derived": true,
 		},
 	}

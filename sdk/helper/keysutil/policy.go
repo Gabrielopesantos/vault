@@ -216,7 +216,7 @@ type KeyData struct {
 
 // KeyEntry stores the key and metadata
 type KeyEntry struct {
-	// AES or some other kind that is a pure byte slice like ED25519, ECDSA
+	// AES or some other kind that is a pure byte slice like ED25519
 	Key []byte `json:"key"`
 
 	// Key used for HMAC functions
@@ -893,7 +893,7 @@ func (p *Policy) DeriveKey(context, salt []byte, ver int, numBytes int) ([]byte,
 
 			derBytes, err := x509.MarshalPKCS8PrivateKey(pri)
 			if err != nil {
-				return nil, fmt.Errorf("could not parse generated private key: %w", err)
+				return nil, fmt.Errorf("could not marshal the generated private key: %w", err)
 			}
 
 			return derBytes, nil
