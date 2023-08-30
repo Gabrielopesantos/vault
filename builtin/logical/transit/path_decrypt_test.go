@@ -124,6 +124,7 @@ func TestTransit_BatchDecryption_DerivedKey(t *testing.T) {
 		shouldErr      bool
 		wantHTTPStatus int
 		params         map[string]interface{}
+		base64Decoded  bool
 	}{
 		{
 			name:      "nil-input",
@@ -226,6 +227,16 @@ func TestTransit_BatchDecryption_DerivedKey(t *testing.T) {
 			// Full failure, shouldn't affect status code
 			wantHTTPStatus: http.StatusBadRequest,
 		},
+		{
+			name: "single-item-base64-decoded-output-success",
+			in: []interface{}{
+				map[string]interface{}{"ciphertext": encryptedItems[0].Ciphertext, "context": plaintextItems[0].context},
+			},
+			want: []DecryptBatchResponseItem{
+				{Plaintext: "the quick brown fox"},
+			},
+			base64Decoded: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -235,7 +246,8 @@ func TestTransit_BatchDecryption_DerivedKey(t *testing.T) {
 				Path:      "decrypt/existing_key",
 				Storage:   s,
 				Data: map[string]interface{}{
-					"batch_input": tt.in,
+					"batch_input":    tt.in,
+					"base64_decoded": tt.base64Decoded,
 				},
 			}
 			for k, v := range tt.params {

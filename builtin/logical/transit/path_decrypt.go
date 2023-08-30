@@ -93,6 +93,12 @@ parameter is set, if the parameters 'ciphertext', 'context' and 'nonce' are
 also set, they will be ignored. Any batch output will preserve the order
 of the batch input.`,
 			},
+
+			"base64_decoded": {
+				Type: framework.TypeBool,
+				Description: `If set, the plaintext will be returned as a string
+instead of base64 encoded.`,
+			},
 		},
 
 		Callbacks: map[logical.Operation]framework.OperationFunc{
@@ -217,6 +223,7 @@ func (b *backend) pathDecryptWrite(ctx context.Context, req *logical.Request, d 
 			}
 		}
 
+		base64Decoded := d.Get("base64_decoded").(bool)
 		plaintext, err := p.DecryptWithFactory(item.DecodedContext, item.DecodedNonce, item.Ciphertext, factory, managedKeyFactory)
 		if err != nil {
 			switch err.(type) {
@@ -229,6 +236,13 @@ func (b *backend) pathDecryptWrite(ctx context.Context, req *logical.Request, d 
 			continue
 		}
 		successesInBatch = true
+		if base64Decoded {
+			base64DecodedPlaintext, err := base64.StdEncoding.DecodeString(plaintext)
+			if err != nil {
+				return nil, errutil.InternalError{Err: fmt.Sprintf("failed to decode plaintext: %s", err)}
+			}
+			plaintext = string(base64DecodedPlaintext)
+		}
 		batchResponseItems[i].Plaintext = plaintext
 	}
 
